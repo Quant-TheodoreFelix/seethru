@@ -1,6 +1,7 @@
 {
   "name": "seethru-workspace",
   "private": true,
+  "license": "Apache-2.0",
   "packageManager": "pnpm@11.20.0",
   "scripts": {
     "dev": "pnpm --filter @seethru/web dev",
