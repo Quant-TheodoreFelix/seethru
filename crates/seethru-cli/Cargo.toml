@@ -1,0 +1,21 @@
+[package]
+name = "seethru-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "seethru"
+path = "src/main.rs"
+
+[dependencies]
+seethru-core.workspace = true
+seethru-analyzer.workspace = true
+seethru-probe.workspace = true
+seethru-fix.workspace = true
+seethru-report.workspace = true
+seethru-mcp.workspace = true
+
+[lints]
+workspace = true

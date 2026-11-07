@@ -1,0 +1,10 @@
+{
+  "name": "seethru-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev": "pnpm --filter @seethru/web dev",
+    "build": "pnpm --filter @seethru/web build",
+    "typecheck": "pnpm --filter @seethru/web typecheck"
+  }
+}

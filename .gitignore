@@ -1,0 +1,13 @@
+/target/
+node_modules/
+/web/dist/
+
+.env
+.env.*
+*.pem
+*.key
+
+.ast-bro/
+graphify-out/
+.DS_Store
+*.log
