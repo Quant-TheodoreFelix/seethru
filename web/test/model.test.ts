@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ReportError, parseScanReport, worstSeverity } from "../src/model.ts";
+import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src/model.ts";
 
 function validReport(): Record<string, unknown> {
   return {
@@ -78,4 +78,14 @@ test("rejects duplicate node ids and negative counts", () => {
   const negative = validReport();
   negative.target = { name: "app", filesScanned: -1, filesSkipped: 0, truncated: false };
   assert.throws(() => parseScanReport(negative), ReportError);
+});
+
+test("lists each edge kind in the report once in a fixed order", () => {
+  const edges = [
+    { from: "a", to: "b", kind: "reads" },
+    { from: "a", to: "c", kind: "defines" },
+    { from: "b", to: "c", kind: "reads" },
+  ] as const;
+  assert.deepEqual(edgeKindsIn({ edges: [...edges] }), ["defines", "reads"]);
+  assert.deepEqual(edgeKindsIn({ edges: [] }), []);
 });

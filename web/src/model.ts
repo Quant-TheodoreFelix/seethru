@@ -32,7 +32,7 @@ const SECRET_KINDS = [
 ] as const;
 export type SecretKind = (typeof SECRET_KINDS)[number];
 
-const EDGE_KINDS = ["defines", "guardedBy", "queries", "writes", "reads", "contains"] as const;
+export const EDGE_KINDS = ["defines", "guardedBy", "queries", "writes", "reads", "contains"] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
 export interface Location {
@@ -254,4 +254,9 @@ export function worstSeverity(findings: readonly Finding[]): Severity | undefine
     }
   }
   return worst;
+}
+
+export function edgeKindsIn(report: Pick<ScanReport, "edges">): EdgeKind[] {
+  const present = new Set(report.edges.map((edge) => edge.kind));
+  return EDGE_KINDS.filter((kind) => present.has(kind));
 }

@@ -5,9 +5,8 @@ import type { GraphNode } from "./layout";
 export function ReportNodeView({ data, selected }: NodeProps<GraphNode>) {
   const { node, severity, findingCount } = data;
   const classes = ["node", `node-${node.kind.type}`];
-  if (severity) classes.push(`sev-${severity}`);
+  if (severity) classes.push("has-finding", `sev-${severity}`);
   if (selected) classes.push("is-selected");
-  if (node.kind.type === "table") classes.push(`rls-${node.kind.rls}`);
 
   return (
     <div className={classes.join(" ")}>
@@ -17,7 +16,7 @@ export function ReportNodeView({ data, selected }: NodeProps<GraphNode>) {
         {node.label}
       </div>
       {severity ? (
-        <span className="node-badge">
+        <span className={`node-badge tag sev-${severity}`}>
           {SEVERITY_LABEL[severity]}
           {findingCount > 1 ? ` ${findingCount}` : ""}
         </span>

@@ -3,6 +3,7 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -13,10 +14,10 @@ import "@xyflow/react/dist/style.css";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { InlineText } from "./InlineText";
-import { SEVERITY_LABEL } from "./labels";
+import { EDGE_LABEL, SEVERITY_LABEL } from "./labels";
 import { layoutReport, type GraphNode } from "./layout";
 import { readEmbeddedReport, readReportFile } from "./loadReport";
-import { SEVERITIES, type Finding, type ScanReport, type Severity } from "./model";
+import { SEVERITIES, edgeKindsIn, type EdgeKind, type Finding, type ScanReport, type Severity } from "./model";
 import { ReportNodeView } from "./ReportNodeView";
 import { THEMES, type Theme } from "./theme";
 import { useTheme } from "./useTheme";
@@ -24,6 +25,7 @@ import { useTheme } from "./useTheme";
 const nodeTypes: NodeTypes = { report: ReportNodeView };
 
 const PANEL_WIDTH = 420;
+const MINIMAP_MIN_NODES = 40;
 const WIDE_SCREEN = "(min-width: 861px)";
 
 type Loaded = { state: "empty" } | { state: "error"; message: string } | { state: "ready"; report: ScanReport };
@@ -113,8 +115,34 @@ function SeverityTag({ severity }: { severity: Severity }) {
   return <span className={`tag sev-${severity}`}>{SEVERITY_LABEL[severity]}</span>;
 }
 
+function minimapClass(node: GraphNode) {
+  return node.data.severity ? `sev-${node.data.severity}` : "";
+}
+
+function Legend({ kinds }: { kinds: EdgeKind[] }) {
+  if (kinds.length === 0) return null;
+  return (
+    <Panel position="top-left" className="legend" aria-label="Line styles">
+      <ul>
+        {kinds.map((kind) => (
+          <li key={kind}>
+            <svg width="28" height="8" aria-hidden="true">
+              <line className={`legend-line edge-${kind}`} x1="0" y1="4" x2="28" y2="4" />
+            </svg>
+            {EDGE_LABEL[kind]}
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
 function px(value: number) {
   return `${value}px` as const;
+}
+
+function overviewPadding() {
+  return { top: px(72), bottom: px(32), left: px(72), right: px(32) };
 }
 
 function focusPadding() {
@@ -137,7 +165,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
         if (!active) return;
         setNodes(layout.nodes);
         setEdges(layout.edges);
-        requestAnimationFrame(() => void flow.fitView({ padding: 0.08 }));
+        requestAnimationFrame(() => void flow.fitView({ padding: overviewPadding() }));
       },
       (error: unknown) => {
         if (active) setLayoutError(error instanceof Error ? error.message : "layout failed");
@@ -156,6 +184,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   }, [selectedId]);
 
   const selected = useMemo(() => report.findings.find((finding) => finding.id === selectedId), [report, selectedId]);
+  const edgeKinds = useMemo(() => edgeKindsIn(report), [report]);
 
   const focus = useCallback(
     (finding: Finding) => {
@@ -237,7 +266,10 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} />
             <Controls position="top-left" showInteractive={false} />
-            <MiniMap position="bottom-left" pannable zoomable />
+            {report.nodes.length > MINIMAP_MIN_NODES ? (
+              <MiniMap<GraphNode> position="bottom-left" nodeClassName={minimapClass} pannable zoomable />
+            ) : null}
+            <Legend kinds={edgeKinds} />
           </ReactFlow>
           <AnimatePresence mode="wait">
             {selected ? (
