@@ -88,6 +88,7 @@ name = "seethru-analyzer"
 version = "0.1.0"
 dependencies = [
  "seethru-core",
+ "serde_json",
 ]
 
 [[package]]

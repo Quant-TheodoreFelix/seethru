@@ -1,0 +1,308 @@
+use std::collections::BTreeSet;
+
+use seethru_core::FileRole;
+
+const SCRIPT_EXTENSIONS: &[&str] = &["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"];
+
+const TEXT_EXTENSIONS: &[&str] = &[
+    "json",
+    "jsonc",
+    "map",
+    "html",
+    "htm",
+    "css",
+    "vue",
+    "svelte",
+    "astro",
+    "md",
+    "mdx",
+    "yml",
+    "yaml",
+    "toml",
+    "txt",
+    "ini",
+    "conf",
+    "cfg",
+    "properties",
+    "xml",
+    "sh",
+    "bash",
+    "zsh",
+    "py",
+    "rb",
+    "go",
+    "rs",
+    "java",
+    "kt",
+    "swift",
+    "php",
+    "cs",
+    "dart",
+    "tf",
+    "tfvars",
+];
+
+const BUILD_DIRS_ANYWHERE: &[&str] = &[
+    "dist",
+    ".next",
+    ".output",
+    ".svelte-kit",
+    ".vercel",
+    ".nuxt",
+];
+const BUILD_DIRS_AT_ROOT: &[&str] = &["build", "out"];
+
+const VITE_CONFIGS: &[&str] = &[
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mts",
+    "vite.config.mjs",
+    "vite.config.cts",
+    "vite.config.cjs",
+];
+const NEXT_CONFIGS: &[&str] = &[
+    "next.config.js",
+    "next.config.mjs",
+    "next.config.ts",
+    "next.config.cjs",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Content {
+    Sql,
+    Script,
+    Env,
+    Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Class {
+    pub role: FileRole,
+    pub content: Content,
+}
+
+#[derive(Default)]
+pub(crate) struct ProjectHints {
+    vite_roots: BTreeSet<String>,
+    next_roots: BTreeSet<String>,
+}
+
+pub(crate) fn is_wanted(rel_path: &str) -> bool {
+    content_of(file_name(rel_path)).is_some()
+}
+
+impl ProjectHints {
+    pub(crate) fn from_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Self {
+        let mut hints = Self::default();
+        for path in paths {
+            let (dir, name) = split_dir(path);
+            if VITE_CONFIGS.contains(&name) {
+                hints.vite_roots.insert(dir.to_owned());
+            } else if NEXT_CONFIGS.contains(&name) {
+                hints.next_roots.insert(dir.to_owned());
+            }
+        }
+        hints
+    }
+
+    pub(crate) fn classify(&self, rel_path: &str) -> Option<Class> {
+        let content = content_of(file_name(rel_path))?;
+        let role = match content {
+            Content::Sql => FileRole::Migration,
+            Content::Env => FileRole::EnvFile,
+            Content::Script | Content::Text if is_build_output(rel_path) => FileRole::BuildOutput,
+            Content::Script => self.script_role(rel_path),
+            Content::Text => FileRole::Other,
+        };
+        Some(Class { role, content })
+    }
+
+    fn script_role(&self, rel_path: &str) -> FileRole {
+        if has_prefix_dir(rel_path, "supabase/functions")
+            || rel_path.contains("/supabase/functions/")
+        {
+            return FileRole::EdgeFunction;
+        }
+        let next_root = deepest_root(&self.next_roots, rel_path);
+        let vite_root = deepest_root(&self.vite_roots, rel_path);
+        match (next_root, vite_root) {
+            (Some(next), vite) if vite.is_none_or(|vite| next.len() >= vite.len()) => {
+                next_role(strip_root(rel_path, next))
+            }
+            (_, Some(vite)) => vite_role(strip_root(rel_path, vite)),
+            _ => FileRole::UnknownCode,
+        }
+    }
+}
+
+fn next_role(path: &str) -> FileRole {
+    let path = path.strip_prefix("src/").unwrap_or(path);
+    let name = file_name(path);
+    let stem = name.split('.').next().unwrap_or(name);
+    if path.starts_with("pages/api/")
+        || (path.starts_with("app/") && stem == "route")
+        || (!path.contains('/') && (stem == "middleware" || stem == "instrumentation"))
+    {
+        FileRole::ServerCode
+    } else if !path.contains('/') && name.contains(".config.") {
+        FileRole::Other
+    } else {
+        FileRole::UnknownCode
+    }
+}
+
+fn vite_role(path: &str) -> FileRole {
+    if path.starts_with("src/") {
+        FileRole::BrowserCode
+    } else if !path.contains('/') && file_name(path).contains(".config.") {
+        FileRole::Other
+    } else {
+        FileRole::UnknownCode
+    }
+}
+
+fn content_of(name: &str) -> Option<Content> {
+    if name == ".env" || name.starts_with(".env.") || name.ends_with(".env") {
+        return Some(Content::Env);
+    }
+    let (_, ext) = name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    if ext == "sql" {
+        Some(Content::Sql)
+    } else if SCRIPT_EXTENSIONS.contains(&ext.as_str()) {
+        Some(Content::Script)
+    } else if TEXT_EXTENSIONS.contains(&ext.as_str()) {
+        Some(Content::Text)
+    } else {
+        None
+    }
+}
+
+fn is_build_output(rel_path: &str) -> bool {
+    let mut segments = rel_path.split('/');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    let dirs: Vec<&str> = std::iter::once(first).chain(segments).collect();
+    let Some((_, dirs)) = dirs.split_last() else {
+        return false;
+    };
+    dirs.first()
+        .is_some_and(|first| BUILD_DIRS_AT_ROOT.contains(first))
+        || dirs.iter().any(|dir| BUILD_DIRS_ANYWHERE.contains(dir))
+}
+
+fn deepest_root<'a>(roots: &'a BTreeSet<String>, rel_path: &str) -> Option<&'a str> {
+    roots
+        .iter()
+        .filter(|root| root.is_empty() || has_prefix_dir(rel_path, root))
+        .max_by_key(|root| root.len())
+        .map(String::as_str)
+}
+
+fn strip_root<'a>(rel_path: &'a str, root: &str) -> &'a str {
+    if root.is_empty() {
+        rel_path
+    } else {
+        rel_path
+            .strip_prefix(root)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .unwrap_or(rel_path)
+    }
+}
+
+fn has_prefix_dir(rel_path: &str, dir: &str) -> bool {
+    rel_path
+        .strip_prefix(dir)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn split_dir(rel_path: &str) -> (&str, &str) {
+    rel_path.rsplit_once('/').unwrap_or(("", rel_path))
+}
+
+pub(crate) fn file_name(rel_path: &str) -> &str {
+    split_dir(rel_path).1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Content, ProjectHints};
+    use seethru_core::FileRole;
+
+    fn role(hints: &ProjectHints, path: &str) -> Option<FileRole> {
+        hints.classify(path).map(|class| class.role)
+    }
+
+    #[test]
+    fn vite_src_runs_in_browser() {
+        let hints = ProjectHints::from_paths(["vite.config.ts", "src/App.tsx"].into_iter());
+        assert_eq!(
+            role(&hints, "src/lib/supabase.ts"),
+            Some(FileRole::BrowserCode)
+        );
+        assert_eq!(role(&hints, "vite.config.ts"), Some(FileRole::Other));
+        assert_eq!(role(&hints, "scripts/seed.ts"), Some(FileRole::UnknownCode));
+    }
+
+    #[test]
+    fn nested_vite_project_is_detected() {
+        let hints = ProjectHints::from_paths(["apps/web/vite.config.ts"].into_iter());
+        assert_eq!(
+            role(&hints, "apps/web/src/main.tsx"),
+            Some(FileRole::BrowserCode)
+        );
+        assert_eq!(
+            role(&hints, "apps/api/src/main.ts"),
+            Some(FileRole::UnknownCode)
+        );
+    }
+
+    #[test]
+    fn next_server_paths_are_server_code() {
+        let hints = ProjectHints::from_paths(["next.config.mjs"].into_iter());
+        assert_eq!(
+            role(&hints, "app/api/todos/route.ts"),
+            Some(FileRole::ServerCode)
+        );
+        assert_eq!(
+            role(&hints, "src/pages/api/hello.ts"),
+            Some(FileRole::ServerCode)
+        );
+        assert_eq!(role(&hints, "middleware.ts"), Some(FileRole::ServerCode));
+        assert_eq!(role(&hints, "app/page.tsx"), Some(FileRole::UnknownCode));
+    }
+
+    #[test]
+    fn special_locations_override_framework() {
+        let hints = ProjectHints::from_paths(["vite.config.ts"].into_iter());
+        assert_eq!(
+            role(&hints, "supabase/functions/hello/index.ts"),
+            Some(FileRole::EdgeFunction)
+        );
+        assert_eq!(
+            role(&hints, "supabase/migrations/0001_init.sql"),
+            Some(FileRole::Migration)
+        );
+        assert_eq!(
+            role(&hints, "dist/assets/index-abc.js"),
+            Some(FileRole::BuildOutput)
+        );
+        assert_eq!(role(&hints, ".env.local"), Some(FileRole::EnvFile));
+        assert_eq!(
+            role(&hints, "src/build/util.ts"),
+            Some(FileRole::BrowserCode)
+        );
+    }
+
+    #[test]
+    fn unknown_extensions_are_not_read() {
+        let hints = ProjectHints::default();
+        assert_eq!(hints.classify("logo.png"), None);
+        assert_eq!(hints.classify("Makefile"), None);
+        assert_eq!(
+            hints.classify("README.md").map(|class| class.content),
+            Some(Content::Text)
+        );
+    }
+}
