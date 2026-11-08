@@ -12,9 +12,14 @@ pub(crate) const PUBLIC_PREFIXES: &[&str] = &[
 const TEMPLATE_SUFFIXES: &[&str] = &["example", "sample", "template", "dist", "defaults"];
 
 pub(crate) fn is_public(name: &str) -> bool {
+    public_prefix(name).is_some()
+}
+
+pub(crate) fn public_prefix(name: &str) -> Option<&'static str> {
     PUBLIC_PREFIXES
         .iter()
-        .any(|prefix| name.starts_with(prefix))
+        .find(|prefix| name.starts_with(*prefix))
+        .copied()
 }
 
 pub(crate) fn is_template_file(file_name: &str) -> bool {

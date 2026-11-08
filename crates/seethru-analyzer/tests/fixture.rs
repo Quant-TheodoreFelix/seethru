@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use seethru_core::{RuleId, Severity};
+use seethru_core::{EdgeKind, RuleId, Severity};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -29,6 +29,11 @@ fn supabase_vite_fixture_reports_expected_findings() {
                 "table:public.todos"
             ),
             (
+                RuleId::SupabaseServiceRoleInBrowser,
+                Severity::Critical,
+                "env:VITE_SUPABASE_SERVICE_ROLE_KEY"
+            ),
+            (
                 RuleId::SupabasePolicyUnrestricted,
                 Severity::High,
                 "policy:public.posts/Signed in users can edit posts"
@@ -45,7 +50,39 @@ fn supabase_vite_fixture_reports_expected_findings() {
             ),
         ]
     );
-    assert_eq!(report.summary.critical, 1);
+    assert_eq!(report.summary.critical, 2);
+
+    let edge = |from: &str, to: &str, kind: EdgeKind| {
+        report
+            .edges
+            .iter()
+            .any(|edge| edge.from.as_str() == from && edge.to.as_str() == to && edge.kind == kind)
+    };
+    assert!(edge(
+        "file:src/pages/Todos.tsx",
+        "table:public.todos",
+        EdgeKind::Queries
+    ));
+    assert!(edge(
+        "file:src/pages/Todos.tsx",
+        "table:public.todos",
+        EdgeKind::Writes
+    ));
+    assert!(edge(
+        "file:src/lib/admin.ts",
+        "env:VITE_SUPABASE_SERVICE_ROLE_KEY",
+        EdgeKind::Reads
+    ));
+    assert!(edge(
+        "file:src/lib/admin.ts",
+        "table:public.posts",
+        EdgeKind::Writes
+    ));
+    assert!(edge(
+        "file:supabase/functions/admin-report/index.ts",
+        "env:SUPABASE_SERVICE_ROLE_KEY",
+        EdgeKind::Reads
+    ));
 }
 
 #[test]

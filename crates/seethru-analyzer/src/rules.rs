@@ -61,6 +61,19 @@ pub(crate) fn policy_unrestricted(
     }
 }
 
+pub(crate) fn service_role_in_browser(var: &str, prefix: &str) -> Text {
+    let var = display_name(var);
+    let prefix = display_name(prefix);
+    Text {
+        title: format!("브라우저 코드가 `{var}` 환경변수를 읽고 있어요"),
+        explanation: format!(
+            "`{prefix}`로 시작하는 환경변수는 빌드할 때 브라우저 코드에 그대로 들어가요. \
+             service_role 키는 RLS를 무시하는 관리자 키라서, 이 키가 브라우저에 있으면 누구나 데이터베이스 전체를 \
+             읽고, 고치고, 지울 수 있어요. {ROTATE} 관리자 작업은 Edge Function 같은 서버 쪽 코드로 옮기세요."
+        ),
+    }
+}
+
 pub(crate) fn secret_label(kind: SecretKind) -> &'static str {
     match kind {
         SecretKind::SupabaseServiceRoleKey => "Supabase service_role 키",

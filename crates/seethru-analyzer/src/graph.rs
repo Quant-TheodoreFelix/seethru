@@ -46,6 +46,23 @@ impl Graph {
         })
     }
 
+    pub(crate) fn add_table(&mut self, schema: &str, name: &str) -> NodeId {
+        let label = if schema == "public" {
+            name.to_owned()
+        } else {
+            format!("{schema}.{name}")
+        };
+        self.add_node(Node {
+            id: NodeId::new(format!("table:{schema}.{name}")),
+            label,
+            kind: NodeKind::Table {
+                schema: schema.to_owned(),
+                rls: seethru_core::RlsStatus::Unknown,
+            },
+            location: None,
+        })
+    }
+
     pub(crate) fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
         self.edges.insert(Edge { from, to, kind });
     }
