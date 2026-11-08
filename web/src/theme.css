@@ -1,0 +1,197 @@
+:root {
+  color-scheme: light;
+  --bg: #b6dfee;
+  --surface: #ffffff;
+  --ink: #141413;
+  --muted: #2b3d44;
+  --rule: #141413;
+  --shadow: #141413;
+  --code-bg: rgb(20 20 19 / 0.08);
+  --grid: rgb(20 20 19 / 0.3);
+  --select-bg: #141413;
+  --select-ink: #b6dfee;
+  --sev-ink: #141413;
+  --critical: #ff6b4a;
+  --high: #ff9f43;
+  --medium: #ffd84d;
+  --low: #9fe3b4;
+  --info: #dcdcd6;
+  --font-serif: "Times New Roman", Times, "Liberation Serif", Tinos, "Nimbus Roman", AppleMyungjo,
+    "Nanum Myeongjo", "Noto Serif KR", "Noto Serif CJK KR", Batang, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", "Nanum Gothic Coding", monospace;
+  --border: 2px;
+  --gutter: 20px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.45;
+  font-kerning: normal;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #141413;
+    --surface: #1f1f1d;
+    --ink: #ecebe4;
+    --muted: #a3a29a;
+    --rule: #ecebe4;
+    --shadow: #b6dfee;
+    --code-bg: rgb(236 235 228 / 0.1);
+    --grid: rgb(236 235 228 / 0.22);
+    --select-bg: #b6dfee;
+    --select-ink: #141413;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141413;
+  --surface: #1f1f1d;
+  --ink: #ecebe4;
+  --muted: #a3a29a;
+  --rule: #ecebe4;
+  --shadow: #b6dfee;
+  --code-bg: rgb(236 235 228 / 0.1);
+  --grid: rgb(236 235 228 / 0.22);
+  --select-bg: #b6dfee;
+  --select-ink: #141413;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+}
+
+::selection {
+  background: var(--select-bg);
+  color: var(--select-ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--shadow);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  padding: 0.05em 0.3em;
+  background: var(--code-bg);
+  overflow-wrap: anywhere;
+}
+
+.sev-critical { --sev: var(--critical); }
+.sev-high { --sev: var(--high); }
+.sev-medium { --sev: var(--medium); }
+.sev-low { --sev: var(--low); }
+.sev-info { --sev: var(--info); }
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 6px 0;
+  border: 1.5px solid var(--sev-ink);
+  background: var(--sev);
+  color: var(--sev-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 17px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.button {
+  padding: 5px 14px 4px;
+  border: var(--border) solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 3px 3px 0 var(--shadow);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform 80ms ease-out,
+    box-shadow 80ms ease-out;
+}
+
+.button:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--shadow);
+}
+
+.button:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--shadow);
+}
+
+.theme-switch {
+  display: inline-flex;
+  margin: 0;
+  padding: 0;
+  border: var(--border) solid var(--rule);
+  list-style: none;
+}
+
+.theme-switch li + li {
+  border-left: var(--border) solid var(--rule);
+}
+
+.theme-switch button {
+  padding: 4px 10px 3px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.theme-switch button[aria-pressed="true"] {
+  background: var(--select-bg);
+  color: var(--select-ink);
+}
+
+.error {
+  margin: 0;
+  padding: 8px 12px;
+  border: var(--border) solid var(--rule);
+  background: var(--critical);
+  color: var(--sev-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

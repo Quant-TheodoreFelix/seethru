@@ -1,7 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import "./styles.css";
+import "./theme.css";
+import "./shell.css";
+import "./graph.css";
 
 document.addEventListener("securitypolicyviolation", (event) => {
   const root = document.documentElement;

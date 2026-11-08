@@ -1,0 +1,85 @@
+.node {
+  box-sizing: border-box;
+  width: 248px;
+  height: 72px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  position: relative;
+  transition: box-shadow 0.2s ease;
+}
+
+.node[class*="sev-"] {
+  border-color: var(--sev);
+  box-shadow: 0 0 0 1px var(--sev);
+}
+
+.node.is-selected {
+  box-shadow: 0 0 0 3px var(--select-bg);
+}
+
+.node-kind {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-label {
+  margin-top: 2px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-badge {
+  position: absolute;
+  top: -10px;
+  right: 10px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--sev);
+  color: var(--sev-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.edge-guardedBy path {
+  stroke-dasharray: 4 4;
+}
+
+.react-flow {
+  --xy-background-color: var(--bg);
+  --xy-background-pattern-color: var(--grid);
+  --xy-edge-stroke: var(--ink);
+  --xy-edge-stroke-selected: var(--ink);
+  font-family: var(--font-serif);
+}
+
+.react-flow__edge.edge-writes path.react-flow__edge-path {
+  stroke-width: 2.5;
+}
+
+.react-flow__edge.edge-reads path.react-flow__edge-path {
+  stroke-dasharray: 2 4;
+}
+
+.node-envVar,
+.node-secret {
+  border-style: dashed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node {
+    transition: none;
+  }
+
+  .react-flow__edge.animated path {
+    animation: none;
+  }
+}
