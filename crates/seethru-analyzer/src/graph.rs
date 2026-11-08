@@ -35,6 +35,17 @@ impl Graph {
         })
     }
 
+    pub(crate) fn add_env_var(&mut self, name: &str) -> NodeId {
+        self.add_node(Node {
+            id: NodeId::new(format!("env:{name}")),
+            label: name.to_owned(),
+            kind: NodeKind::EnvVar {
+                exposed_to_browser: crate::env::is_public(name),
+            },
+            location: None,
+        })
+    }
+
     pub(crate) fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
         self.edges.insert(Edge { from, to, kind });
     }

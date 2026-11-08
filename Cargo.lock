@@ -164,6 +164,7 @@ dependencies = [
 name = "seethru-analyzer"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "seethru-core",
  "serde_json",
 ]

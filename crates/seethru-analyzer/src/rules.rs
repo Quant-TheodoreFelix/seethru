@@ -1,4 +1,4 @@
-use seethru_core::PolicyCommand;
+use seethru_core::{PolicyCommand, SecretKind};
 
 const MAX_LABEL_CHARS: usize = 80;
 
@@ -57,6 +57,85 @@ pub(crate) fn policy_unrestricted(
             "이 정책은 조건이 항상 참(true)이라서 {who} `{table}` 테이블에서 {what}. \
              보통은 `auth.uid() = user_id`처럼 본인 행만 허용하는 조건이 필요해요. \
              모두에게 공개하려고 일부러 만든 정책이라면 그대로 두어도 괜찮아요."
+        ),
+    }
+}
+
+pub(crate) fn secret_label(kind: SecretKind) -> &'static str {
+    match kind {
+        SecretKind::SupabaseServiceRoleKey => "Supabase service_role 키",
+        SecretKind::SupabaseSecretKey => "Supabase 비밀 키",
+        SecretKind::DatabaseUrl => "DB 비밀번호가 들어 있는 접속 주소",
+        SecretKind::StripeSecretKey => "Stripe 비밀 키",
+        SecretKind::OpenAiApiKey => "OpenAI API 키",
+        SecretKind::AnthropicApiKey => "Anthropic API 키",
+        SecretKind::AwsAccessKeyId => "AWS 액세스 키",
+        SecretKind::GithubToken => "GitHub 토큰",
+        SecretKind::PrivateKey => "개인 키",
+    }
+}
+
+fn secret_risk(kind: SecretKind) -> &'static str {
+    match kind {
+        SecretKind::SupabaseServiceRoleKey | SecretKind::SupabaseSecretKey => {
+            "이 키는 RLS를 무시하고 데이터베이스의 모든 데이터를 읽고, 고치고, 지울 수 있는 관리자 키예요."
+        }
+        SecretKind::DatabaseUrl => {
+            "이 주소만 있으면 데이터베이스에 직접 접속해 모든 데이터를 다룰 수 있어요."
+        }
+        SecretKind::StripeSecretKey => "이 키로 결제를 만들거나 환불하고 고객 정보를 볼 수 있어요.",
+        SecretKind::OpenAiApiKey | SecretKind::AnthropicApiKey => {
+            "다른 사람이 이 키로 AI API를 호출하면 요금이 내 계정으로 청구돼요."
+        }
+        SecretKind::AwsAccessKeyId => "이 키에 연결된 권한만큼 AWS 자원을 마음대로 쓸 수 있어요.",
+        SecretKind::GithubToken => "이 토큰의 권한만큼 저장소 코드를 읽거나 바꿀 수 있어요.",
+        SecretKind::PrivateKey => "이 키로 서명하거나 암호화된 통신을 풀 수 있어요.",
+    }
+}
+
+const ROTATE: &str = "키를 지금 바로 폐기하고 새로 발급하세요. 코드에서 지우는 것만으로는 이미 노출된 키를 되돌릴 수 없어요.";
+
+pub(crate) fn secret_in_browser(kind: SecretKind, file: &str) -> Text {
+    let file = display_name(file);
+    Text {
+        title: format!(
+            "브라우저로 전달되는 `{file}` 파일에 비밀 값({})이 들어 있어요",
+            secret_label(kind)
+        ),
+        explanation: format!(
+            "이 파일은 방문자의 브라우저로 그대로 전달돼요. 개발자 도구만 열면 누구나 이 값을 꺼낼 수 있어요. {} {ROTATE} \
+             새 키는 서버나 Edge Function에서만 쓰도록 옮겨야 해요.",
+            secret_risk(kind)
+        ),
+    }
+}
+
+pub(crate) fn secret_in_public_env(kind: SecretKind, var: &str) -> Text {
+    let var = display_name(var);
+    Text {
+        title: format!(
+            "`{var}` 환경변수에 비밀 값({})이 들어 있어요",
+            secret_label(kind)
+        ),
+        explanation: format!(
+            "이름이 공개 접두사로 시작하는 환경변수는 빌드할 때 브라우저 코드에 그대로 들어가요. {} {ROTATE} \
+             새 키는 공개 접두사가 없는 이름으로 바꾸고 서버 쪽 코드에서만 읽어야 해요.",
+            secret_risk(kind)
+        ),
+    }
+}
+
+pub(crate) fn secret_in_source(kind: SecretKind, file: &str) -> Text {
+    let file = display_name(file);
+    Text {
+        title: format!(
+            "`{file}` 파일에 비밀 값({})이 직접 적혀 있어요",
+            secret_label(kind)
+        ),
+        explanation: format!(
+            "코드나 설정 파일에 적힌 값은 저장소를 볼 수 있는 모든 사람에게 노출돼요. {} {ROTATE} \
+             새 키는 커밋하지 않는 환경변수 파일이나 배포 환경의 비밀 설정에 넣으세요.",
+            secret_risk(kind)
         ),
     }
 }

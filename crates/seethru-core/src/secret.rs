@@ -24,6 +24,11 @@ impl MaskedSecret {
         Self(out)
     }
 
+    pub fn with_context(before: &str, secret: &str, after: &str) -> Self {
+        let inner = Self::mask(secret, 0);
+        Self(format!("{before}{}{after}", inner.0))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -44,6 +49,13 @@ mod tests {
     fn short_values_reveal_at_most_a_third() {
         let masked = MaskedSecret::mask("abcdefghi", 8);
         assert_eq!(masked.as_str(), "abc****");
+    }
+
+    #[test]
+    fn context_stays_visible_around_the_masked_part() {
+        let masked =
+            MaskedSecret::with_context("postgres://app:", "s3cretpassword", "@db.example.com");
+        assert_eq!(masked.as_str(), "postgres://app:****@db.example.com");
     }
 
     #[test]
