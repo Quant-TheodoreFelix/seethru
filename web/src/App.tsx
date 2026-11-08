@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { InlineText } from "./InlineText";
 import { SEVERITY_LABEL } from "./labels";
 import { layoutReport, type GraphNode } from "./layout";
@@ -178,10 +178,45 @@ function ReportView({ report }: { report: ScanReport }) {
                   </code>
                 </p>
               ) : null}
+              {selected.fixPrompt ? <FixPrompt key={selected.id} prompt={selected.fixPrompt} /> : null}
             </motion.section>
           ) : null}
         </AnimatePresence>
       </aside>
+    </div>
+  );
+}
+
+type CopyState = "idle" | "copied" | "manual";
+
+function FixPrompt({ prompt }: { prompt: string }) {
+  const area = useRef<HTMLTextAreaElement>(null);
+  const [state, setState] = useState<CopyState>("idle");
+
+  const copy = useCallback(() => {
+    const selectForManualCopy = () => {
+      area.current?.focus();
+      area.current?.select();
+      setState("manual");
+    };
+    if (!navigator.clipboard) {
+      selectForManualCopy();
+      return;
+    }
+    navigator.clipboard.writeText(prompt).then(() => setState("copied"), selectForManualCopy);
+  }, [prompt]);
+
+  return (
+    <div className="fix">
+      <div className="fix-head">
+        <h4>AI에게 고쳐 달라고 하기</h4>
+        <button type="button" className="copy" onClick={copy}>
+          {state === "copied" ? "복사했어요" : "프롬프트 복사"}
+        </button>
+      </div>
+      <p className="muted">Cursor, Claude, Lovable 같은 AI 코딩 도구에 그대로 붙여 넣으세요.</p>
+      <textarea ref={area} className="fix-prompt" readOnly value={prompt} rows={9} spellCheck={false} />
+      {state === "manual" ? <p className="muted">브라우저가 자동 복사를 막았어요. 선택된 내용을 직접 복사해 주세요.</p> : null}
     </div>
   );
 }
