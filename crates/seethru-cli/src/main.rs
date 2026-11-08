@@ -202,9 +202,14 @@ fn severity_label(severity: Severity) -> &'static str {
 
 fn print_summary(out: &mut impl Write, report: &ScanReport) -> io::Result<()> {
     let s = &report.summary;
+    let files = if report.target.files_scanned == 1 {
+        "file"
+    } else {
+        "files"
+    };
     writeln!(
         out,
-        "seethru scan {} ({} files, {} skipped)",
+        "seethru scan {} ({} {files}, {} skipped)",
         report.target.name, report.target.files_scanned, report.target.files_skipped
     )?;
     if report.target.truncated {
