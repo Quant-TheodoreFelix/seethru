@@ -17,6 +17,8 @@ import { layoutReport, type GraphNode } from "./layout";
 import { readEmbeddedReport, readReportFile } from "./loadReport";
 import { SEVERITIES, type Finding, type ScanReport } from "./model";
 import { ReportNodeView } from "./ReportNodeView";
+import { THEMES, type Theme } from "./theme";
+import { useTheme } from "./useTheme";
 
 const nodeTypes: NodeTypes = { report: ReportNodeView };
 
@@ -33,6 +35,7 @@ function initialState(): Loaded {
 
 export function App() {
   const [loaded, setLoaded] = useState<Loaded>(initialState);
+  const [theme, setTheme] = useTheme();
 
   const onFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -46,6 +49,7 @@ export function App() {
   if (loaded.state !== "ready") {
     return (
       <main className="landing">
+        <ThemeSwitch theme={theme} onChange={setTheme} />
         <h1>seethru</h1>
         <p>
           Open a report file made with <code>seethru scan --json</code>.
@@ -61,12 +65,26 @@ export function App() {
 
   return (
     <ReactFlowProvider>
-      <ReportView report={loaded.report} />
+      <ReportView report={loaded.report} theme={theme} onTheme={setTheme} />
     </ReactFlowProvider>
   );
 }
 
-function ReportView({ report }: { report: ScanReport }) {
+function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+  return (
+    <ul className="theme-switch" aria-label="Color theme">
+      {THEMES.map((option) => (
+        <li key={option}>
+          <button type="button" aria-pressed={theme === option} onClick={() => onChange(option)}>
+            {option === "light" ? "Light" : "Dark"}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ReportView({ report, theme, onTheme }: { report: ScanReport; theme: Theme; onTheme: (theme: Theme) => void }) {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [layoutError, setLayoutError] = useState<string>();
@@ -115,6 +133,7 @@ function ReportView({ report }: { report: ScanReport }) {
             </li>
           ))}
         </ul>
+        <ThemeSwitch theme={theme} onChange={onTheme} />
       </header>
       <main className="canvas">
         {layoutError ? <p className="error">Could not draw the graph ({layoutError})</p> : null}
@@ -122,7 +141,7 @@ function ReportView({ report }: { report: ScanReport }) {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          colorMode="system"
+          colorMode={theme}
           nodesConnectable={false}
           minZoom={0.1}
           proOptions={{ hideAttribution: true }}
