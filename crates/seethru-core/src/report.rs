@@ -215,6 +215,7 @@ pub enum EdgeKind {
     Defines,
     GuardedBy,
     Queries,
+    Writes,
     Reads,
     Contains,
 }

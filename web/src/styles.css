@@ -272,6 +272,19 @@ code {
   stroke-dasharray: 4 4;
 }
 
+.react-flow__edge.edge-writes path.react-flow__edge-path {
+  stroke: var(--high);
+}
+
+.react-flow__edge.edge-reads path.react-flow__edge-path {
+  stroke: var(--low);
+}
+
+.node-envVar,
+.node-secret {
+  border-style: dashed;
+}
+
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);

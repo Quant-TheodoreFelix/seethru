@@ -32,7 +32,7 @@ const SECRET_KINDS = [
 ] as const;
 export type SecretKind = (typeof SECRET_KINDS)[number];
 
-const EDGE_KINDS = ["defines", "guardedBy", "queries", "reads", "contains"] as const;
+const EDGE_KINDS = ["defines", "guardedBy", "queries", "writes", "reads", "contains"] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
 export interface Location {

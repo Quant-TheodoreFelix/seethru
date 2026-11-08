@@ -43,6 +43,7 @@ export const EDGE_LABEL: Record<EdgeKind, string> = {
   defines: "정의",
   guardedBy: "정책",
   queries: "조회",
+  writes: "수정",
   reads: "참조",
   contains: "포함",
 };

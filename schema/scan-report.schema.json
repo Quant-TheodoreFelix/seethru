@@ -25,6 +25,7 @@
         "defines",
         "guardedBy",
         "queries",
+        "writes",
         "reads",
         "contains"
       ],
