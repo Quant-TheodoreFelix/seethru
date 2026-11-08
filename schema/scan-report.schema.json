@@ -1,0 +1,434 @@
+{
+  "$defs": {
+    "Edge": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/EdgeKind"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EdgeKind": {
+      "enum": [
+        "defines",
+        "guardedBy",
+        "queries",
+        "reads",
+        "contains"
+      ],
+      "type": "string"
+    },
+    "FileRole": {
+      "enum": [
+        "browserCode",
+        "serverCode",
+        "edgeFunction",
+        "unknownCode",
+        "migration",
+        "envFile",
+        "buildOutput",
+        "other"
+      ],
+      "type": "string"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "explanation": {
+          "type": "string"
+        },
+        "fixPrompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "node": {
+          "type": "string"
+        },
+        "rule": {
+          "$ref": "#/$defs/RuleId"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "rule",
+        "severity",
+        "title",
+        "explanation",
+        "node"
+      ],
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "column"
+      ],
+      "type": "object"
+    },
+    "Node": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/NodeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "NodeKind": {
+      "oneOf": [
+        {
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/FileRole"
+            },
+            "type": {
+              "const": "file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "role"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "rls": {
+              "$ref": "#/$defs/RlsStatus"
+            },
+            "schema": {
+              "type": "string"
+            },
+            "type": {
+              "const": "table",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "schema",
+            "rls"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/PolicyCommand"
+            },
+            "roles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "policy",
+              "type": "string"
+            },
+            "unrestricted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "roles",
+            "unrestricted"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "exposedToBrowser": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "envVar",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "exposedToBrowser"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "masked": {
+              "type": "string"
+            },
+            "secretKind": {
+              "$ref": "#/$defs/SecretKind"
+            },
+            "type": {
+              "const": "secret",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "secretKind",
+            "masked"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PolicyCommand": {
+      "enum": [
+        "all",
+        "select",
+        "insert",
+        "update",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "RlsStatus": {
+      "enum": [
+        "enabled",
+        "disabled",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "RuleId": {
+      "enum": [
+        "supabase-rls-disabled",
+        "supabase-policy-unrestricted",
+        "supabase-service-role-in-browser",
+        "secret-in-browser-code",
+        "secret-in-source-code",
+        "secret-in-public-env-var"
+      ],
+      "type": "string"
+    },
+    "SecretKind": {
+      "enum": [
+        "supabaseServiceRoleKey",
+        "supabaseSecretKey",
+        "databaseUrl",
+        "stripeSecretKey",
+        "openAiApiKey",
+        "anthropicApiKey",
+        "awsAccessKeyId",
+        "githubToken",
+        "privateKey"
+      ],
+      "type": "string"
+    },
+    "Severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ],
+      "type": "string"
+    },
+    "Summary": {
+      "additionalProperties": false,
+      "properties": {
+        "critical": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "high": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "info": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "low": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "medium": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ],
+      "type": "object"
+    },
+    "TargetInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "filesScanned": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "filesSkipped": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "filesScanned",
+        "filesSkipped",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "ToolInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/Edge"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/Node"
+      },
+      "type": "array"
+    },
+    "schemaVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "target": {
+      "$ref": "#/$defs/TargetInfo"
+    },
+    "tool": {
+      "$ref": "#/$defs/ToolInfo"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "tool",
+    "target",
+    "summary",
+    "nodes",
+    "edges",
+    "findings"
+  ],
+  "title": "ScanReport",
+  "type": "object"
+}

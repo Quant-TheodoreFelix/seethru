@@ -17,6 +17,9 @@ seethru-probe = { path = "crates/seethru-probe" }
 seethru-fix = { path = "crates/seethru-fix" }
 seethru-report = { path = "crates/seethru-report" }
 seethru-mcp = { path = "crates/seethru-mcp" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+schemars = "=1.2.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
