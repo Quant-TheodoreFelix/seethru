@@ -41,7 +41,7 @@ pub fn render_html(report: &ScanReport) -> Result<String, ReportError> {
     let title = escape_html(&report.target.name);
     let mut html =
         String::with_capacity(assets::APP_JS.len() + assets::APP_CSS.len() + data.len() + 1024);
-    html.push_str("<!doctype html>\n<html lang=\"ko\">\n<head>\n<meta charset=\"utf-8\">\n");
+    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
     html.push_str(&format!(
         "<meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n"
     ));

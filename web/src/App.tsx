@@ -48,13 +48,13 @@ export function App() {
       <main className="landing">
         <h1>seethru</h1>
         <p>
-          <code>seethru scan --json</code>으로 만든 결과 파일을 열어 주세요.
+          Open a report file made with <code>seethru scan --json</code>.
         </p>
         <label className="file-button">
-          결과 파일 열기
+          Open report file
           <input type="file" accept="application/json,.json" onChange={onFile} />
         </label>
-        {loaded.state === "error" ? <p className="error">결과 파일을 읽지 못했어요 ({loaded.message})</p> : null}
+        {loaded.state === "error" ? <p className="error">Could not read the report file ({loaded.message})</p> : null}
       </main>
     );
   }
@@ -117,7 +117,7 @@ function ReportView({ report }: { report: ScanReport }) {
         </ul>
       </header>
       <main className="canvas">
-        {layoutError ? <p className="error">그래프를 그리지 못했어요 ({layoutError})</p> : null}
+        {layoutError ? <p className="error">Could not draw the graph ({layoutError})</p> : null}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -137,8 +137,8 @@ function ReportView({ report }: { report: ScanReport }) {
         </ReactFlow>
       </main>
       <aside className="sidebar">
-        <h2>발견한 문제 {report.findings.length}개</h2>
-        {report.findings.length === 0 ? <p className="muted">발견한 문제가 없어요.</p> : null}
+        <h2>Findings ({report.findings.length})</h2>
+        {report.findings.length === 0 ? <p className="muted">No problems found.</p> : null}
         <ol className="findings">
           {report.findings.map((finding) => (
             <li key={finding.id}>
@@ -209,14 +209,14 @@ function FixPrompt({ prompt }: { prompt: string }) {
   return (
     <div className="fix">
       <div className="fix-head">
-        <h4>AI에게 고쳐 달라고 하기</h4>
+        <h4>Ask your AI to fix it</h4>
         <button type="button" className="copy" onClick={copy}>
-          {state === "copied" ? "복사했어요" : "프롬프트 복사"}
+          {state === "copied" ? "Copied" : "Copy prompt"}
         </button>
       </div>
-      <p className="muted">Cursor, Claude, Lovable 같은 AI 코딩 도구에 그대로 붙여 넣으세요.</p>
+      <p className="muted">Paste it as is into an AI coding tool such as Cursor, Claude or Lovable.</p>
       <textarea ref={area} className="fix-prompt" readOnly value={prompt} rows={9} spellCheck={false} />
-      {state === "manual" ? <p className="muted">브라우저가 자동 복사를 막았어요. 선택된 내용을 직접 복사해 주세요.</p> : null}
+      {state === "manual" ? <p className="muted">The browser blocked copying. The prompt is selected, so copy it yourself.</p> : null}
     </div>
   );
 }
