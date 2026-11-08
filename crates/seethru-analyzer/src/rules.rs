@@ -22,11 +22,11 @@ pub(crate) fn display_name(raw: &str) -> String {
 pub(crate) fn rls_disabled(table: &str) -> Text {
     let table = display_name(table);
     Text {
-        title: format!("`{table}` 테이블에 RLS가 꺼져 있어요"),
+        title: format!("RLS is off for the `{table}` table"),
         explanation: format!(
-            "RLS(행 수준 보안)가 꺼진 테이블은 누구나 모든 행을 읽고, 고치고, 지울 수 있어요. \
-             앱에 들어 있는 Supabase anon 키는 브라우저에 그대로 공개되기 때문에, \
-             이 키만 있으면 로그인하지 않은 사람도 `{table}` 테이블 전체에 접근할 수 있어요."
+            "With RLS (row level security) off, anyone can read, change and delete every row in this table. \
+             The Supabase anon key in your app is public in the browser, \
+             so anyone who has it can reach the whole `{table}` table without signing in."
         ),
     }
 }
@@ -40,23 +40,23 @@ pub(crate) fn policy_unrestricted(
     let table = display_name(table);
     let policy = display_name(policy);
     let who = if anyone {
-        "로그인하지 않은 사람을 포함한 누구나"
+        "anyone, even people who are not signed in,"
     } else {
-        "로그인한 사용자라면 누구나"
+        "any signed-in user"
     };
     let what = match command {
-        PolicyCommand::All => "모든 행을 읽고, 고치고, 지울 수 있어요",
-        PolicyCommand::Select => "모든 행을 읽을 수 있어요",
-        PolicyCommand::Insert => "아무 내용이나 새 행으로 추가할 수 있어요",
-        PolicyCommand::Update => "다른 사람의 행까지 고칠 수 있어요",
-        PolicyCommand::Delete => "다른 사람의 행까지 지울 수 있어요",
+        PolicyCommand::All => "read, change and delete every row",
+        PolicyCommand::Select => "read every row",
+        PolicyCommand::Insert => "add any row they like",
+        PolicyCommand::Update => "change rows that belong to other people",
+        PolicyCommand::Delete => "delete rows that belong to other people",
     };
     Text {
-        title: format!("`{table}` 테이블의 `{policy}` 정책이 모든 행을 열어 두고 있어요"),
+        title: format!("The `{policy}` policy opens every row of the `{table}` table"),
         explanation: format!(
-            "이 정책은 조건이 항상 참(true)이라서 {who} `{table}` 테이블에서 {what}. \
-             보통은 `auth.uid() = user_id`처럼 본인 행만 허용하는 조건이 필요해요. \
-             모두에게 공개하려고 일부러 만든 정책이라면 그대로 두어도 괜찮아요."
+            "The condition of this policy is always true, so {who} can {what} in the `{table}` table. \
+             The condition should usually allow only the user's own rows, such as `auth.uid() = user_id`. \
+             If you made this policy to share the table with everyone on purpose, you can leave it as it is."
         ),
     }
 }
@@ -65,59 +65,63 @@ pub(crate) fn service_role_in_browser(var: &str, prefix: &str) -> Text {
     let var = display_name(var);
     let prefix = display_name(prefix);
     Text {
-        title: format!("브라우저 코드가 `{var}` 환경변수를 읽고 있어요"),
+        title: format!("Browser code reads the `{var}` env variable"),
         explanation: format!(
-            "`{prefix}`로 시작하는 환경변수는 빌드할 때 브라우저 코드에 그대로 들어가요. \
-             service_role 키는 RLS를 무시하는 관리자 키라서, 이 키가 브라우저에 있으면 누구나 데이터베이스 전체를 \
-             읽고, 고치고, 지울 수 있어요. {ROTATE} 관리자 작업은 Edge Function 같은 서버 쪽 코드로 옮기세요."
+            "Env variables that start with `{prefix}` are copied into browser code when the app is built. \
+             The service_role key is an admin key that skips RLS, so anyone who finds it in the browser \
+             can read, change and delete your whole database. {ROTATE} \
+             Move admin work to server code such as an Edge Function."
         ),
     }
 }
 
 pub(crate) fn secret_label(kind: SecretKind) -> &'static str {
     match kind {
-        SecretKind::SupabaseServiceRoleKey => "Supabase service_role 키",
-        SecretKind::SupabaseSecretKey => "Supabase 비밀 키",
-        SecretKind::DatabaseUrl => "DB 비밀번호가 들어 있는 접속 주소",
-        SecretKind::StripeSecretKey => "Stripe 비밀 키",
-        SecretKind::OpenAiApiKey => "OpenAI API 키",
-        SecretKind::AnthropicApiKey => "Anthropic API 키",
-        SecretKind::AwsAccessKeyId => "AWS 액세스 키",
-        SecretKind::GithubToken => "GitHub 토큰",
-        SecretKind::PrivateKey => "개인 키",
+        SecretKind::SupabaseServiceRoleKey => "a Supabase service_role key",
+        SecretKind::SupabaseSecretKey => "a Supabase secret key",
+        SecretKind::DatabaseUrl => "a database URL with a password",
+        SecretKind::StripeSecretKey => "a Stripe secret key",
+        SecretKind::OpenAiApiKey => "an OpenAI API key",
+        SecretKind::AnthropicApiKey => "an Anthropic API key",
+        SecretKind::AwsAccessKeyId => "an AWS access key",
+        SecretKind::GithubToken => "a GitHub token",
+        SecretKind::PrivateKey => "a private key",
     }
 }
 
 fn secret_risk(kind: SecretKind) -> &'static str {
     match kind {
         SecretKind::SupabaseServiceRoleKey | SecretKind::SupabaseSecretKey => {
-            "이 키는 RLS를 무시하고 데이터베이스의 모든 데이터를 읽고, 고치고, 지울 수 있는 관리자 키예요."
+            "This admin key skips RLS and can read, change and delete all data in your database."
         }
         SecretKind::DatabaseUrl => {
-            "이 주소만 있으면 데이터베이스에 직접 접속해 모든 데이터를 다룰 수 있어요."
+            "Anyone with this URL can connect to your database directly and do anything with the data."
         }
-        SecretKind::StripeSecretKey => "이 키로 결제를 만들거나 환불하고 고객 정보를 볼 수 있어요.",
+        SecretKind::StripeSecretKey => {
+            "This key can create charges, issue refunds and read customer details."
+        }
         SecretKind::OpenAiApiKey | SecretKind::AnthropicApiKey => {
-            "다른 사람이 이 키로 AI API를 호출하면 요금이 내 계정으로 청구돼요."
+            "Anyone can call the AI API with this key and the bill goes to your account."
         }
-        SecretKind::AwsAccessKeyId => "이 키에 연결된 권한만큼 AWS 자원을 마음대로 쓸 수 있어요.",
-        SecretKind::GithubToken => "이 토큰의 권한만큼 저장소 코드를 읽거나 바꿀 수 있어요.",
-        SecretKind::PrivateKey => "이 키로 서명하거나 암호화된 통신을 풀 수 있어요.",
+        SecretKind::AwsAccessKeyId => {
+            "This key can use your AWS resources with every permission it was given."
+        }
+        SecretKind::GithubToken => {
+            "This token can read or change repository code with every permission it was given."
+        }
+        SecretKind::PrivateKey => "This key can sign data or decrypt protected traffic.",
     }
 }
 
-const ROTATE: &str = "키를 지금 바로 폐기하고 새로 발급하세요. 코드에서 지우는 것만으로는 이미 노출된 키를 되돌릴 수 없어요.";
+const ROTATE: &str = "Revoke the key now and issue a new one. Deleting it from the code cannot undo a key that has already leaked.";
 
 pub(crate) fn secret_in_browser(kind: SecretKind, file: &str) -> Text {
     let file = display_name(file);
     Text {
-        title: format!(
-            "브라우저로 전달되는 `{file}` 파일에 비밀 값({})이 들어 있어요",
-            secret_label(kind)
-        ),
+        title: format!("`{file}` sends {} to the browser", secret_label(kind)),
         explanation: format!(
-            "이 파일은 방문자의 브라우저로 그대로 전달돼요. 개발자 도구만 열면 누구나 이 값을 꺼낼 수 있어요. {} {ROTATE} \
-             새 키는 서버나 Edge Function에서만 쓰도록 옮겨야 해요.",
+            "This file is delivered to the browser of every visitor, and anyone can pull the value out with the developer tools. \
+             {} {ROTATE} Use the new key only on a server or in an Edge Function.",
             secret_risk(kind)
         ),
     }
@@ -126,13 +130,10 @@ pub(crate) fn secret_in_browser(kind: SecretKind, file: &str) -> Text {
 pub(crate) fn secret_in_public_env(kind: SecretKind, var: &str) -> Text {
     let var = display_name(var);
     Text {
-        title: format!(
-            "`{var}` 환경변수에 비밀 값({})이 들어 있어요",
-            secret_label(kind)
-        ),
+        title: format!("The `{var}` env variable holds {}", secret_label(kind)),
         explanation: format!(
-            "이름이 공개 접두사로 시작하는 환경변수는 빌드할 때 브라우저 코드에 그대로 들어가요. {} {ROTATE} \
-             새 키는 공개 접두사가 없는 이름으로 바꾸고 서버 쪽 코드에서만 읽어야 해요.",
+            "Env variables whose names start with a public prefix are copied into browser code when the app is built. \
+             {} {ROTATE} Give the new key a name without the public prefix and read it only in server code.",
             secret_risk(kind)
         ),
     }
@@ -141,13 +142,10 @@ pub(crate) fn secret_in_public_env(kind: SecretKind, var: &str) -> Text {
 pub(crate) fn secret_in_source(kind: SecretKind, file: &str) -> Text {
     let file = display_name(file);
     Text {
-        title: format!(
-            "`{file}` 파일에 비밀 값({})이 직접 적혀 있어요",
-            secret_label(kind)
-        ),
+        title: format!("`{file}` has {} written in it", secret_label(kind)),
         explanation: format!(
-            "코드나 설정 파일에 적힌 값은 저장소를 볼 수 있는 모든 사람에게 노출돼요. {} {ROTATE} \
-             새 키는 커밋하지 않는 환경변수 파일이나 배포 환경의 비밀 설정에 넣으세요.",
+            "Values written in code or config files are visible to everyone who can see the repository. \
+             {} {ROTATE} Keep the new key in an env file that is not committed or in the secret settings of your host.",
             secret_risk(kind)
         ),
     }
