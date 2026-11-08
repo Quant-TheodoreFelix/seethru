@@ -25,6 +25,7 @@
   overflow: hidden;
   font-size: 17px;
   font-style: italic;
+  font-synthesis-style: none;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -414,4 +415,5 @@
   font-family: inherit;
   font-size: 1em;
   font-style: italic;
+  font-synthesis-style: none;
 }

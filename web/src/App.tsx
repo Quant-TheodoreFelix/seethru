@@ -65,7 +65,8 @@ export function App() {
                   {report.target.name}
                 </span>
                 <span className="target-meta">
-                  {report.target.filesScanned} files scanned{report.target.truncated ? ", stopped early" : ""}
+                  {report.target.filesScanned} {report.target.filesScanned === 1 ? "file" : "files"} scanned
+                  {report.target.truncated ? ", stopped early" : ""}
                 </span>
               </>
             ) : null}
