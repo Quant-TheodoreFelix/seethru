@@ -17,6 +17,8 @@ seethru-probe.workspace = true
 seethru-fix.workspace = true
 seethru-report.workspace = true
 seethru-mcp.workspace = true
+lexopt.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
