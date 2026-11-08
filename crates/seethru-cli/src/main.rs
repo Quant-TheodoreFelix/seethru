@@ -124,7 +124,8 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             writeln!(stdout)?;
         }
         Command::Scan { path, out, json } => {
-            let report = seethru_analyzer::scan(&path)?;
+            let mut report = seethru_analyzer::scan(&path)?;
+            seethru_fix::attach_fix_prompts(&mut report);
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
                 writeln!(stdout)?;
