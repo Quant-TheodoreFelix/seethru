@@ -1,0 +1,81 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ReportError, parseScanReport, worstSeverity } from "../src/model.ts";
+
+function validReport(): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    tool: { name: "seethru", version: "0.1.0" },
+    target: { name: "app", filesScanned: 2, filesSkipped: 0, truncated: false },
+    summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+    nodes: [
+      { id: "file:a.sql", label: "a.sql", kind: { type: "file", role: "migration" } },
+      {
+        id: "table:public.todos",
+        label: "todos",
+        kind: { type: "table", schema: "public", rls: "disabled" },
+        location: { path: "a.sql", line: 1, column: 1 },
+      },
+    ],
+    edges: [{ from: "file:a.sql", to: "table:public.todos", kind: "defines" }],
+    findings: [
+      {
+        id: "supabase-rls-disabled:table:public.todos",
+        rule: "supabase-rls-disabled",
+        severity: "critical",
+        title: "t",
+        explanation: "e",
+        node: "table:public.todos",
+      },
+    ],
+  };
+}
+
+test("accepts a valid report", () => {
+  const report = parseScanReport(validReport());
+  assert.equal(report.nodes.length, 2);
+  assert.equal(report.findings[0]?.severity, "critical");
+  assert.equal(worstSeverity(report.findings), "critical");
+});
+
+test("rejects unknown fields", () => {
+  const report = validReport();
+  report.extra = true;
+  assert.throws(() => parseScanReport(report), ReportError);
+});
+
+test("rejects edges and findings that point at missing nodes", () => {
+  const dangling = validReport();
+  dangling.edges = [{ from: "file:a.sql", to: "table:public.ghost", kind: "defines" }];
+  assert.throws(() => parseScanReport(dangling), /known node/);
+
+  const orphan = validReport();
+  orphan.findings = [{ ...(validReport().findings as object[])[0], node: "ghost" }];
+  assert.throws(() => parseScanReport(orphan), /known node/);
+});
+
+test("rejects unknown enum values and node types", () => {
+  const badSeverity = validReport();
+  badSeverity.summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0, extreme: 1 };
+  assert.throws(() => parseScanReport(badSeverity), ReportError);
+
+  const badKind = validReport();
+  badKind.nodes = [{ id: "x", label: "x", kind: { type: "script", src: "https://example.invalid/x.js" } }];
+  assert.throws(() => parseScanReport(badKind), ReportError);
+});
+
+test("rejects wrong schema versions and non objects", () => {
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 2 }), ReportError);
+  assert.throws(() => parseScanReport(null), ReportError);
+  assert.throws(() => parseScanReport([]), ReportError);
+});
+
+test("rejects duplicate node ids and negative counts", () => {
+  const duplicate = validReport();
+  duplicate.nodes = [...(validReport().nodes as object[]), (validReport().nodes as object[])[0]];
+  assert.throws(() => parseScanReport(duplicate), /unique/);
+
+  const negative = validReport();
+  negative.target = { name: "app", filesScanned: -1, filesSkipped: 0, truncated: false };
+  assert.throws(() => parseScanReport(negative), ReportError);
+});

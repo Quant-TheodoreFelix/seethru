@@ -32,5 +32,18 @@ export default defineConfig({
   plugins: [react(), injectContentSecurityPolicy()],
   server: { host: "127.0.0.1", strictPort: true },
   preview: { host: "127.0.0.1", strictPort: true },
-  build: { sourcemap: false },
+  build: {
+    sourcemap: false,
+    cssCodeSplit: false,
+    modulePreload: false,
+    assetsInlineLimit: 0,
+    chunkSizeWarningLimit: 4096,
+    rolldownOptions: {
+      output: {
+        codeSplitting: false,
+        entryFileNames: "app.js",
+        assetFileNames: (asset) => (asset.names.some((name) => name.endsWith(".css")) ? "app.css" : "assets/[name]-[hash][extname]"),
+      },
+    },
+  },
 });
