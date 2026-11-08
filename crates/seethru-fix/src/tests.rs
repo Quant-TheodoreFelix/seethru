@@ -5,7 +5,7 @@ use seethru_core::{
     SecretKind, Severity, Summary, TargetInfo, ToolInfo,
 };
 
-use super::{attach_fix_prompts, fix_prompt};
+use super::{CLOSING, attach_fix_prompts, fix_prompt};
 
 fn fixture_report() -> Option<ScanReport> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/supabase-vite");
@@ -36,7 +36,7 @@ fn every_finding_gets_a_prompt_with_its_location() {
             .map(|l| l.path.as_str())
             .unwrap_or_default();
         assert!(prompt.contains(path), "{prompt}");
-        assert!(prompt.ends_with("알려 줘."), "{prompt}");
+        assert!(prompt.ends_with(CLOSING), "{prompt}");
     }
 }
 
@@ -68,7 +68,7 @@ fn policy_and_service_role_prompts_point_at_the_right_places() {
     assert!(service.contains("`src/lib/admin.ts`"), "{service}");
     let policy = prompt_for(&report, RuleId::SupabasePolicyUnrestricted);
     assert!(
-        policy.contains("`posts` 테이블의 `Signed in users can edit posts` 정책"),
+        policy.contains("The `Signed in users can edit posts` policy on the Supabase `posts` table (`update` for authenticated)"),
         "{policy}"
     );
 }
@@ -130,5 +130,5 @@ fn secret_prompts_never_carry_the_value_and_strip_hostile_names() {
     assert!(prompt.contains("`src/payment.ts:3`"), "{prompt}");
     assert!(!prompt.contains(&masked));
     assert!(!prompt.contains("sk_live_"));
-    assert!(prompt.contains("Stripe 비밀 키"));
+    assert!(prompt.contains("a Stripe secret key"));
 }
