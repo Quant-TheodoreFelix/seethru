@@ -128,6 +128,10 @@ Designed for Zero-Trust and Air-Gapped environments, favoring a single binary an
 | `schema`                  | JSON Schema of the scan report                                        |
 | `fixtures`                | Deliberately vulnerable sample projects for tests (no real keys)      |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and how to add a new rule.
+
 ## Responsible use
 
 Only use seethru on apps you own or are authorized to test. seethru does not run dynamic checks against any target that has not passed ownership verification.

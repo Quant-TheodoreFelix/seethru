@@ -130,6 +130,10 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `schema`                  | 스캔 리포트 JSON Schema                                |
 | `fixtures`                | 테스트용 취약 예제 프로젝트 (실제 키 없음)             |
 
+## 기여하기
+
+개발 환경, 검사 방법, 새 규칙을 추가하는 방법은 [CONTRIBUTING_KR.md](CONTRIBUTING_KR.md)를 참고하세요.
+
 ## 책임 있는 사용
 
 본인이 소유했거나 점검 권한을 받은 앱에만 사용하세요. seethru는 소유권 인증을 통과하지 않은 타겟에는 동적 점검을 하지 않습니다.
