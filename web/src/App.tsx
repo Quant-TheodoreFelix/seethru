@@ -16,7 +16,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { InlineText } from "./InlineText";
 import { layoutReport, type GraphNode } from "./layout";
 import { readEmbeddedReport, readReportFile } from "./loadReport";
-import { SEVERITIES, edgeKindsIn, type EdgeKind, type Finding, type ScanReport, type Severity } from "./model";
+import {
+  SEVERITIES,
+  edgeKindsIn,
+  type Confidence,
+  type EdgeKind,
+  type Finding,
+  type ReportNode,
+  type ScanReport,
+  type Severity,
+} from "./model";
 import { ReportNodeView } from "./ReportNodeView";
 import { LANGS, type Lang } from "./lang";
 import { MESSAGES } from "./messages";
@@ -145,6 +154,57 @@ function SeverityTag({ severity }: { severity: Severity }) {
   return <span className={`tag sev-${severity}`}>{m.severity[severity]}</span>;
 }
 
+function ConfidenceTag({ confidence }: { confidence: Confidence }) {
+  const m = useMessages();
+  if (confidence === "certain") return null;
+  return <span className={`confidence confidence-${confidence}`}>{m.confidence[confidence]}</span>;
+}
+
+function Evidence({ finding, nodes }: { finding: Finding; nodes: Map<string, ReportNode> }) {
+  const m = useMessages();
+  if (finding.evidence.length === 0) return null;
+  return (
+    <section className="evidence" aria-label={m.evidence}>
+      <h4>{m.evidence}</h4>
+      <ol>
+        {finding.evidence.map((step, index) => {
+          const node = step.node ? nodes.get(step.node) : undefined;
+          return (
+            <li key={index}>
+              {step.via ? <span className="evidence-via">{m.edge[step.via]}</span> : null}
+              <span className="evidence-label">{step.label}</span>
+              {node ? <span className="evidence-zone">{m.zone[node.zone]}</span> : null}
+              {step.location ? (
+                <span className="evidence-where">
+                  {step.location.path}:{step.location.line}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function Limitations({ report }: { report: ScanReport }) {
+  const lang = useCurrentLang();
+  const m = useMessages();
+  if (report.target.limitations.length === 0) return null;
+  return (
+    <section className="limitations" aria-label={m.limitations}>
+      <h3>{m.limitations}</h3>
+      <ul>
+        {report.target.limitations.map((limitation) => (
+          <li key={limitation.code}>
+            <InlineText text={limitation.text[lang]} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function minimapClass(node: GraphNode) {
   return node.data.severity ? `sev-${node.data.severity}` : "";
 }
@@ -220,12 +280,20 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   const open = useMemo(() => report.findings.filter((finding) => !finding.accepted), [report]);
   const accepted = useMemo(() => report.findings.filter((finding) => finding.accepted), [report]);
   const edgeKinds = useMemo(() => edgeKindsIn(report), [report]);
+  const nodeById = useMemo(() => new Map(report.nodes.map((node) => [node.id, node])), [report]);
 
   const focus = useCallback(
     (finding: Finding) => {
       setSelectedId(finding.id);
-      setNodes((current) => current.map((node) => ({ ...node, selected: node.id === finding.node })));
-      void flow.fitView({ nodes: [{ id: finding.node }], duration: 400, maxZoom: 1.1, padding: focusPadding() });
+      const path = new Set<string>([finding.node]);
+      for (const step of finding.evidence) if (step.node) path.add(step.node);
+      setNodes((current) => current.map((node) => ({ ...node, selected: path.has(node.id) })));
+      void flow.fitView({
+        nodes: [...path].map((id) => ({ id })),
+        duration: 400,
+        maxZoom: 1.1,
+        padding: focusPadding(),
+      });
     },
     [flow],
   );
@@ -275,6 +343,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
               </ol>
             </section>
           ) : null}
+          <Limitations report={report} />
         </div>
       </aside>
       <main className="stage">
@@ -323,7 +392,10 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                 transition={{ duration: 0.16, ease: "easeOut" }}
               >
                 <div className="fix-panel-head">
-                  <SeverityTag severity={selected.severity} />
+                  <span className="fix-panel-tags">
+                    <SeverityTag severity={selected.severity} />
+                    <ConfidenceTag confidence={selected.confidence} />
+                  </span>
                   <button type="button" className="button quiet" onClick={clear}>
                     {m.close}
                   </button>
@@ -345,6 +417,13 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                   <span>{m.findingId}</span>
                   <code>{selected.id}</code>
                 </p>
+                {selected.cwe.length > 0 ? (
+                  <p className="finding-id">
+                    <span>CWE</span>
+                    <code>{selected.cwe.map((number) => `CWE-${number}`).join(", ")}</code>
+                  </p>
+                ) : null}
+                <Evidence finding={selected} nodes={nodeById} />
                 {selected.fixPrompt ? <FixPrompt key={`${selected.id}:${lang}`} prompt={selected.fixPrompt[lang]} /> : null}
               </motion.section>
             ) : null}
@@ -379,6 +458,7 @@ function FindingRow({
         <span className="finding-meta">
           <span className="finding-index">{label}</span>
           <SeverityTag severity={finding.severity} />
+          <ConfidenceTag confidence={finding.confidence} />
         </span>
         <span className="finding-title">
           <InlineText text={finding.title[lang]} />

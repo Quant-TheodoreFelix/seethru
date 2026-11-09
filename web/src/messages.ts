@@ -1,5 +1,5 @@
 import type { Lang } from "./lang";
-import type { EdgeKind, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity } from "./model";
+import type { Confidence, EdgeKind, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity, Zone } from "./model";
 import type { Theme } from "./theme";
 
 export type ComponentLabel =
@@ -20,6 +20,8 @@ export type ComponentLabel =
 
 export interface Messages {
   severity: Record<Severity, string>;
+  confidence: Record<Confidence, string>;
+  zone: Record<Zone, string>;
   component: Record<ComponentLabel, string>;
   command: Record<PolicyCommand, string>;
   secret: Record<SecretKind, string>;
@@ -62,12 +64,24 @@ export interface Messages {
   acceptedLabel: string;
   reason: string;
   findingId: string;
+  evidence: string;
+  limitations: string;
 }
 
 const LANGUAGE: Record<Lang, string> = { en: "EN", ko: "KO" };
 
 const en: Messages = {
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" },
+  confidence: { certain: "Confirmed", likely: "Likely", review: "Needs review" },
+  zone: {
+    client: "client",
+    server: "server",
+    database: "database",
+    device: "device",
+    buildTime: "build time",
+    thirdParty: "third party",
+    unknown: "unknown zone",
+  },
   component: {
     browserCode: "Browser code",
     serverCode: "Server code",
@@ -157,10 +171,22 @@ const en: Messages = {
   acceptedLabel: "Accepted",
   reason: "Reason:",
   findingId: "Finding ID",
+  evidence: "How it gets there",
+  limitations: "Not checked",
 };
 
 const ko: Messages = {
   severity: { critical: "치명적", high: "높음", medium: "중간", low: "낮음", info: "정보" },
+  confidence: { certain: "확인됨", likely: "추정", review: "확인 필요" },
+  zone: {
+    client: "클라이언트",
+    server: "서버",
+    database: "데이터베이스",
+    device: "기기",
+    buildTime: "빌드 시점",
+    thirdParty: "바깥 서비스",
+    unknown: "구역 모름",
+  },
   component: {
     browserCode: "브라우저 코드",
     serverCode: "서버 코드",
@@ -250,6 +276,8 @@ const ko: Messages = {
   acceptedLabel: "허용함",
   reason: "사유:",
   findingId: "문제 ID",
+  evidence: "어떻게 닿는지",
+  limitations: "확인하지 못한 것",
 };
 
 export const MESSAGES: Record<Lang, Messages> = { en, ko };
