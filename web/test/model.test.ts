@@ -4,7 +4,7 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -105,6 +105,29 @@ test("accepts every node kind and rejects extra fields inside kind and detail", 
   assert.throws(() => parseScanReport(noZone), /zone/);
 });
 
+test("accepts view and bucket details and rejects malformed ones", () => {
+  const withDetail = (detail: unknown) => {
+    const report = validReport();
+    report.nodes = [{ id: "x", label: "x", kind: { type: "dataStore", detail }, zone: "database" }];
+    report.edges = [];
+    report.findings = [];
+    return report;
+  };
+  const view = { type: "postgresView", schema: "public", securityInvoker: false, materialized: true };
+  assert.deepEqual(parseScanReport(withDetail(view)).nodes[0]?.kind, { type: "dataStore", detail: view });
+  for (const visibility of ["public", "private", "unknown"]) {
+    const bucket = { type: "storageBucket", visibility };
+    assert.deepEqual(parseScanReport(withDetail(bucket)).nodes[0]?.kind, { type: "dataStore", detail: bucket });
+  }
+  assert.throws(() => parseScanReport(withDetail({ ...view, extra: 1 })), /detail\.extra/);
+  assert.throws(() => parseScanReport(withDetail({ type: "postgresView", schema: "public", securityInvoker: false })), ReportError);
+  assert.throws(() => parseScanReport(withDetail({ ...view, securityInvoker: "no" })), /securityInvoker/);
+  assert.throws(() => parseScanReport(withDetail({ ...view, schema: 1 })), /schema/);
+  assert.throws(() => parseScanReport(withDetail({ type: "storageBucket", visibility: "open" })), /visibility/);
+  assert.throws(() => parseScanReport(withDetail({ type: "storageBucket", visibility: "public", extra: 1 })), /detail\.extra/);
+  assert.throws(() => parseScanReport(withDetail({ type: "storageFolder" })), /known detail type/);
+});
+
 test("rejects evidence steps that point at missing nodes", () => {
   const report = validReport();
   const finding = (report.findings as Record<string, unknown>[])[0];
@@ -170,8 +193,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 3 }), /version 4 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 5 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 4 }), /version 5 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 6 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });

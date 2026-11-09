@@ -63,6 +63,20 @@ test("labels graph nodes in the chosen language", () => {
   const table = { type: "dataStore", detail: { type: "postgresTable", schema: "public", rls: "disabled" } } as const;
   assert.equal(kindLabel(table, MESSAGES.en), "Table · RLS off");
   assert.equal(kindLabel(table, MESSAGES.ko), "테이블 · RLS 꺼짐");
+  const view = (securityInvoker: boolean, materialized: boolean) =>
+    ({ type: "dataStore", detail: { type: "postgresView", schema: "public", securityInvoker, materialized } }) as const;
+  assert.equal(kindLabel(view(true, false), MESSAGES.en), "View · uses the caller's permissions");
+  assert.equal(kindLabel(view(false, false), MESSAGES.en), "View · uses the owner's permissions");
+  assert.equal(kindLabel(view(true, true), MESSAGES.en), "View · materialized · uses the owner's permissions");
+  assert.equal(kindLabel(view(false, false), MESSAGES.ko), "뷰 · 만든 사람의 권한으로 동작");
+  assert.equal(kindLabel(view(true, true), MESSAGES.ko), "뷰 · 저장형 · 만든 사람의 권한으로 동작");
+  const bucket = { type: "dataStore", detail: { type: "storageBucket", visibility: "public" } } as const;
+  assert.equal(kindLabel(bucket, MESSAGES.en), "Bucket · public");
+  assert.equal(kindLabel(bucket, MESSAGES.ko), "버킷 · 공개");
+  const rpc = { type: "entryPoint", channel: "rpc", exposure: "public" } as const;
+  assert.equal(kindLabel(rpc, MESSAGES.en), "Database function · anyone can call");
+  assert.equal(kindLabel(rpc, MESSAGES.ko), "DB 함수 · 누구나 호출");
+  assert.equal(kindLabel({ type: "entryPoint", channel: "httpRoute", exposure: "public" }, MESSAGES.en), "Entry point");
   const component = (runtime: "browser" | "server" | "edge" | "unknown", artifact: "source" | "migration" | "config" | "buildOutput" | "other") =>
     kindLabel({ type: "component", runtime, artifact, unit: "file", basis: "path" }, MESSAGES.en);
   assert.equal(component("browser", "source"), "Browser code");

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -351,7 +351,18 @@ pub enum Strength {
     deny_unknown_fields
 )]
 pub enum DataStoreDetail {
-    PostgresTable { schema: String, rls: RlsStatus },
+    PostgresTable {
+        schema: String,
+        rls: RlsStatus,
+    },
+    PostgresView {
+        schema: String,
+        security_invoker: bool,
+        materialized: bool,
+    },
+    StorageBucket {
+        visibility: BucketVisibility,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -400,6 +411,16 @@ pub enum CredentialDetail {
 pub enum RlsStatus {
     Enabled,
     Disabled,
+    Unknown,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum BucketVisibility {
+    Public,
+    Private,
     Unknown,
 }
 
@@ -518,6 +539,9 @@ pub enum RuleId {
     SecretInSourceCode,
     SecretInPublicEnvVar,
     SupabaseTableSchemaMissing,
+    SupabaseFunctionBypassesRls,
+    SupabaseViewBypassesRls,
+    SupabaseStoragePolicyUnrestricted,
 }
 
 impl RuleId {
@@ -530,13 +554,17 @@ impl RuleId {
             Self::SecretInSourceCode => "secret-in-source-code",
             Self::SecretInPublicEnvVar => "secret-in-public-env-var",
             Self::SupabaseTableSchemaMissing => "supabase-table-schema-missing",
+            Self::SupabaseFunctionBypassesRls => "supabase-function-bypasses-rls",
+            Self::SupabaseViewBypassesRls => "supabase-view-bypasses-rls",
+            Self::SupabaseStoragePolicyUnrestricted => "supabase-storage-policy-unrestricted",
         }
     }
 
     pub fn cwe(self) -> &'static [u32] {
         match self {
             Self::SupabaseRlsDisabled => &[862],
-            Self::SupabasePolicyUnrestricted => &[285],
+            Self::SupabasePolicyUnrestricted | Self::SupabaseStoragePolicyUnrestricted => &[285],
+            Self::SupabaseFunctionBypassesRls | Self::SupabaseViewBypassesRls => &[250],
             Self::SupabaseServiceRoleInBrowser
             | Self::SecretInBrowserCode
             | Self::SecretInSourceCode

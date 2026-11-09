@@ -34,6 +34,9 @@ export type Strength = (typeof STRENGTHS)[number];
 const RLS_STATUSES = ["enabled", "disabled", "unknown"] as const;
 export type RlsStatus = (typeof RLS_STATUSES)[number];
 
+const BUCKET_VISIBILITIES = ["public", "private", "unknown"] as const;
+export type BucketVisibility = (typeof BUCKET_VISIBILITIES)[number];
+
 const POLICY_COMMANDS = ["all", "select", "insert", "update", "delete"] as const;
 export type PolicyCommand = (typeof POLICY_COMMANDS)[number];
 
@@ -88,7 +91,10 @@ export interface Location {
   column: number;
 }
 
-export type DataStoreDetail = { type: "postgresTable"; schema: string; rls: RlsStatus };
+export type DataStoreDetail =
+  | { type: "postgresTable"; schema: string; rls: RlsStatus }
+  | { type: "postgresView"; schema: string; securityInvoker: boolean; materialized: boolean }
+  | { type: "storageBucket"; visibility: BucketVisibility };
 export type AccessRuleDetail = { type: "postgresPolicy"; command: PolicyCommand; roles: string[] };
 export type ConfigDetail = { type: "envVar"; exposedToClient: boolean };
 export type CredentialDetail = { type: "secret"; secretKind: SecretKind; masked: string };
@@ -161,7 +167,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -260,9 +266,27 @@ function tagOf(value: unknown, path: string): string {
 }
 
 function dataStoreDetail(value: unknown, path: string): DataStoreDetail {
-  if (tagOf(value, path) !== "postgresTable") fail(`${path}.type`, "known detail type expected");
-  const o = object(value, path, ["type", "schema", "rls"]);
-  return { type: "postgresTable", schema: text(o.schema, `${path}.schema`), rls: oneOf(o.rls, `${path}.rls`, RLS_STATUSES) };
+  switch (tagOf(value, path)) {
+    case "postgresTable": {
+      const o = object(value, path, ["type", "schema", "rls"]);
+      return { type: "postgresTable", schema: text(o.schema, `${path}.schema`), rls: oneOf(o.rls, `${path}.rls`, RLS_STATUSES) };
+    }
+    case "postgresView": {
+      const o = object(value, path, ["type", "schema", "securityInvoker", "materialized"]);
+      return {
+        type: "postgresView",
+        schema: text(o.schema, `${path}.schema`),
+        securityInvoker: flag(o.securityInvoker, `${path}.securityInvoker`),
+        materialized: flag(o.materialized, `${path}.materialized`),
+      };
+    }
+    case "storageBucket": {
+      const o = object(value, path, ["type", "visibility"]);
+      return { type: "storageBucket", visibility: oneOf(o.visibility, `${path}.visibility`, BUCKET_VISIBILITIES) };
+    }
+    default:
+      return fail(`${path}.type`, "known detail type expected");
+  }
 }
 
 function accessRuleDetail(value: unknown, path: string): AccessRuleDetail {

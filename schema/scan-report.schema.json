@@ -62,6 +62,14 @@
       ],
       "type": "string"
     },
+    "BucketVisibility": {
+      "enum": [
+        "public",
+        "private",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "BuildTool": {
       "enum": [
         "vite",
@@ -158,6 +166,48 @@
             "type",
             "schema",
             "rls"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "materialized": {
+              "type": "boolean"
+            },
+            "schema": {
+              "type": "string"
+            },
+            "securityInvoker": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "postgresView",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "schema",
+            "securityInvoker",
+            "materialized"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "storageBucket",
+              "type": "string"
+            },
+            "visibility": {
+              "$ref": "#/$defs/BucketVisibility"
+            }
+          },
+          "required": [
+            "type",
+            "visibility"
           ],
           "type": "object"
         }
@@ -724,7 +774,10 @@
         "secret-in-browser-code",
         "secret-in-source-code",
         "secret-in-public-env-var",
-        "supabase-table-schema-missing"
+        "supabase-table-schema-missing",
+        "supabase-function-bypasses-rls",
+        "supabase-view-bypasses-rls",
+        "supabase-storage-policy-unrestricted"
       ],
       "type": "string"
     },

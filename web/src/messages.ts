@@ -1,5 +1,5 @@
 import type { Lang } from "./lang";
-import type { Confidence, EdgeKind, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity, Zone } from "./model";
+import type { BucketVisibility, Confidence, EdgeKind, Exposure, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity, Zone } from "./model";
 import type { Theme } from "./theme";
 
 export type ComponentLabel =
@@ -30,7 +30,14 @@ export interface Messages {
   edge: Record<EdgeKind, string>;
   theme: Record<Theme, string>;
   language: Record<Lang, string>;
+  bucket: Record<BucketVisibility, string>;
+  exposure: Record<Exposure, string>;
   table: string;
+  view: string;
+  viewCallerRights: string;
+  viewOwnerRights: string;
+  materialized: string;
+  databaseFunction: string;
   rlsOn: string;
   rlsOff: string;
   policy: string;
@@ -132,7 +139,14 @@ const en: Messages = {
   },
   theme: { light: "Light", dark: "Dark" },
   language: LANGUAGE,
+  bucket: { public: "Bucket · public", private: "Bucket · private", unknown: "Bucket · visibility unknown" },
+  exposure: { public: "anyone can call", authenticated: "signed-in users only", internal: "internal only", unknown: "access unknown" },
   table: "Table",
+  view: "View",
+  viewCallerRights: "uses the caller's permissions",
+  viewOwnerRights: "uses the owner's permissions",
+  materialized: "materialized",
+  databaseFunction: "Database function",
   rlsOn: "RLS on",
   rlsOff: "RLS off",
   policy: "Policy",
@@ -240,7 +254,14 @@ const ko: Messages = {
   },
   theme: { light: "라이트", dark: "다크" },
   language: LANGUAGE,
+  bucket: { public: "버킷 · 공개", private: "버킷 · 비공개", unknown: "버킷 · 공개 여부 모름" },
+  exposure: { public: "누구나 호출", authenticated: "로그인한 사용자만", internal: "내부 전용", unknown: "접근 범위 모름" },
   table: "테이블",
+  view: "뷰",
+  viewCallerRights: "호출한 사람의 권한으로 동작",
+  viewOwnerRights: "만든 사람의 권한으로 동작",
+  materialized: "저장형",
+  databaseFunction: "DB 함수",
   rlsOn: "RLS 켜짐",
   rlsOff: "RLS 꺼짐",
   policy: "정책",
@@ -330,10 +351,19 @@ export function kindLabel(kind: NodeKind, m: Messages): string {
   switch (kind.type) {
     case "component":
       return m.component[componentLabel(kind)];
-    case "entryPoint":
-      return m.entryPoint;
+    case "entryPoint": {
+      const base = kind.channel === "rpc" ? m.databaseFunction : m.entryPoint;
+      const exposure = kind.channel === "rpc" ? m.exposure[kind.exposure] : "";
+      return exposure ? `${base} · ${exposure}` : base;
+    }
     case "dataStore": {
-      const rls = kind.detail?.rls;
+      const detail = kind.detail;
+      if (detail?.type === "postgresView") {
+        const rights = detail.securityInvoker && !detail.materialized ? m.viewCallerRights : m.viewOwnerRights;
+        return [m.view, detail.materialized ? m.materialized : "", rights].filter(Boolean).join(" · ");
+      }
+      if (detail?.type === "storageBucket") return m.bucket[detail.visibility];
+      const rls = detail?.type === "postgresTable" ? detail.rls : undefined;
       return rls === "enabled" ? `${m.table} · ${m.rlsOn}` : rls === "disabled" ? `${m.table} · ${m.rlsOff}` : kind.detail ? m.table : m.dataStore;
     }
     case "accessRule":
