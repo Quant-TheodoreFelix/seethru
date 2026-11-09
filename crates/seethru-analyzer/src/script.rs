@@ -137,6 +137,13 @@ fn is_env_object(expr: &Expression<'_>) -> bool {
     }
 }
 
+fn is_storage(expr: &Expression<'_>) -> bool {
+    matches!(
+        expr.get_inner_expression(),
+        Expression::StaticMemberExpression(member) if member.property.name.as_str() == "storage"
+    )
+}
+
 fn literal_text<'a>(expr: &Expression<'a>) -> Option<&'a str> {
     match expr.get_inner_expression() {
         Expression::StringLiteral(literal) => literal.value.as_str(),
@@ -182,6 +189,7 @@ impl<'a> Visit<'a> for Collector {
                 && let Expression::StaticMemberExpression(from) =
                     from_call.callee.get_inner_expression()
                 && from.property.name.as_str() == "from"
+                && !is_storage(&from.object)
                 && let Some(table) = first_literal(&from_call.arguments)
             {
                 self.facts.queries.push(TableQuery {
@@ -234,6 +242,8 @@ mod tests {
             await supabase.from(`notes`).insert({ body });
             await client.from('profiles').update({ name }).eq('id', id);
             await supabase.storage.from("avatars").upload(path, file);
+            await supabase.storage.from("avatars").update(path, file);
+            await supabase.storage.from("avatars").remove([path]);
             Array.from("abc");
             await supabase.from(tableName).select();
         "#;
