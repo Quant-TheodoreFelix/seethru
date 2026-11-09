@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use seethru_core::{EdgeKind, RuleId, Severity};
+use seethru_core::{EdgeKind, FileRole, NodeKind, RuleId, Severity};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -94,6 +94,50 @@ fn report_paths_are_relative_to_the_scanned_project() {
     let absolute = std::fs::canonicalize(&root).unwrap_or(root);
     assert!(!json.contains(&*absolute.to_string_lossy()));
     assert!(!json.contains("/Users/"));
+}
+
+#[test]
+fn supabase_next_fixture_tells_server_code_from_browser_code() {
+    let result = seethru_analyzer::scan(&fixture("supabase-next"));
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+
+    let role = |path: &str| {
+        report.nodes.iter().find_map(|node| match &node.kind {
+            NodeKind::File { role } if node.id.as_str() == format!("file:{path}") => Some(*role),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        role("src/components/TodoList.tsx"),
+        Some(FileRole::BrowserCode)
+    );
+    assert_eq!(role("src/lib/admin.ts"), Some(FileRole::BrowserCode));
+    assert_eq!(
+        role("src/lib/supabase-browser.ts"),
+        Some(FileRole::BrowserCode)
+    );
+    assert_eq!(role("src/app/actions.ts"), Some(FileRole::ServerCode));
+    assert_eq!(
+        role("src/app/api/todos/route.ts"),
+        Some(FileRole::ServerCode)
+    );
+    assert_eq!(role("src/lib/admin-server.ts"), Some(FileRole::ServerCode));
+    assert_eq!(role("src/lib/stats.ts"), Some(FileRole::ServerCode));
+    assert_eq!(role("scripts/seed.ts"), Some(FileRole::UnknownCode));
+
+    let got: Vec<(RuleId, &str)> = report
+        .findings
+        .iter()
+        .map(|finding| (finding.rule, finding.node.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![(
+            RuleId::SupabaseServiceRoleInBrowser,
+            "env:NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"
+        )]
+    );
 }
 
 #[test]

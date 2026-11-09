@@ -1,0 +1,9 @@
+{
+  // Next.js writes this file with comments and trailing commas
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"],
+    },
+  },
+}

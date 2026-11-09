@@ -1,6 +1,7 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, ComputedMemberExpression, Expression, StaticMemberExpression,
+    Argument, CallExpression, ComputedMemberExpression, ExportAllDeclaration,
+    ExportFromDeclaration, Expression, ImportDeclaration, ImportExpression, StaticMemberExpression,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -8,6 +9,8 @@ use oxc_span::SourceType;
 
 pub(crate) const MAX_SCRIPT_BYTES: usize = 1024 * 1024;
 const MAX_NESTING: usize = 512;
+const MAX_IMPORTS: usize = 2_000;
+const SERVER_ONLY_MODULE: &str = "server-only";
 const QUERY_METHODS: &[(&str, Access)] = &[
     ("select", Access::Read),
     ("insert", Access::Write),
@@ -53,6 +56,8 @@ pub(crate) struct TableQuery {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Facts {
     pub directive: Option<Directive>,
+    pub server_only: bool,
+    pub imports: Vec<String>,
     pub env_reads: Vec<EnvRead>,
     pub queries: Vec<TableQuery>,
 }
@@ -111,6 +116,16 @@ struct Collector {
 }
 
 impl Collector {
+    fn import(&mut self, specifier: &str) {
+        if specifier == SERVER_ONLY_MODULE {
+            self.facts.server_only = true;
+        } else if self.facts.imports.len() < MAX_IMPORTS
+            && !self.facts.imports.iter().any(|seen| seen == specifier)
+        {
+            self.facts.imports.push(specifier.to_owned());
+        }
+    }
+
     fn env_read(&mut self, name: &str, offset: u32) {
         if is_interesting_env(name) {
             self.facts.env_reads.push(EnvRead {
@@ -159,6 +174,37 @@ fn first_literal<'a>(arguments: &[Argument<'a>]) -> Option<&'a str> {
 }
 
 impl<'a> Visit<'a> for Collector {
+    fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
+        if !it.import_kind.is_type()
+            && let Some(specifier) = it.source.value.as_str()
+        {
+            self.import(specifier);
+        }
+    }
+
+    fn visit_export_from_declaration(&mut self, it: &ExportFromDeclaration<'a>) {
+        if !it.export_kind.is_type()
+            && let Some(specifier) = it.source.value.as_str()
+        {
+            self.import(specifier);
+        }
+    }
+
+    fn visit_export_all_declaration(&mut self, it: &ExportAllDeclaration<'a>) {
+        if !it.export_kind.is_type()
+            && let Some(specifier) = it.source.value.as_str()
+        {
+            self.import(specifier);
+        }
+    }
+
+    fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {
+        if let Some(specifier) = literal_text(&it.source) {
+            self.import(specifier);
+        }
+        walk::walk_import_expression(self, it);
+    }
+
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
         if is_env_object(&it.object) {
             self.env_read(it.property.name.as_str(), it.span.start);
@@ -176,6 +222,12 @@ impl<'a> Visit<'a> for Collector {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        if let Expression::Identifier(callee) = it.callee.get_inner_expression()
+            && callee.name.as_str() == "require"
+            && let Some(specifier) = first_literal(&it.arguments)
+        {
+            self.import(specifier);
+        }
         if let Expression::StaticMemberExpression(callee) = it.callee.get_inner_expression() {
             let method = callee.property.name.as_str();
             if method == "get"
@@ -280,6 +332,28 @@ mod tests {
         assert_eq!(
             server.and_then(|facts| facts.directive),
             Some(Directive::UseServer)
+        );
+    }
+
+    #[test]
+    fn collects_runtime_imports_and_skips_type_only_ones() {
+        let source = r#"
+            import "server-only";
+            import React from "react";
+            import { a } from "./a";
+            import type { B } from "./b";
+            export { c } from "@/c";
+            export type { D } from "./d";
+            export * from "../e";
+            const f = await import("./f");
+            const g = require("./g");
+            import { a as again } from "./a";
+        "#;
+        let facts = analyze("src/x.ts", source).unwrap_or_default();
+        assert!(facts.server_only);
+        assert_eq!(
+            facts.imports,
+            vec!["react", "./a", "@/c", "../e", "./f", "./g"]
         );
     }
 

@@ -65,6 +65,7 @@ const NEXT_CONFIGS: &[&str] = &[
     "next.config.mjs",
     "next.config.ts",
     "next.config.cjs",
+    "next-env.d.ts",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,10 +112,30 @@ impl ProjectHints {
             Content::Sql => FileRole::Migration,
             Content::Env => FileRole::EnvFile,
             Content::Script | Content::Text if is_build_output(rel_path) => FileRole::BuildOutput,
+            Content::Script | Content::Text if self.is_served_as_is(rel_path) => {
+                FileRole::BrowserCode
+            }
             Content::Script => self.script_role(rel_path),
             Content::Text => FileRole::Other,
         };
         Some(Class { role, content })
+    }
+
+    pub(crate) fn roots(&self) -> Vec<String> {
+        self.next_roots
+            .iter()
+            .chain(&self.vite_roots)
+            .cloned()
+            .collect()
+    }
+
+    fn is_served_as_is(&self, rel_path: &str) -> bool {
+        self.next_roots.iter().chain(&self.vite_roots).any(|root| {
+            strip_root(rel_path, root).starts_with("public/") && has_root(rel_path, root)
+        }) || self
+            .vite_roots
+            .iter()
+            .any(|root| has_root(rel_path, root) && strip_root(rel_path, root) == "index.html")
     }
 
     fn script_role(&self, rel_path: &str) -> FileRole {
@@ -123,6 +144,10 @@ impl ProjectHints {
         {
             return FileRole::EdgeFunction;
         }
+        if has_prefix_dir(rel_path, "netlify/functions") || rel_path.contains("/netlify/functions/")
+        {
+            return FileRole::ServerCode;
+        }
         let next_root = deepest_root(&self.next_roots, rel_path);
         let vite_root = deepest_root(&self.vite_roots, rel_path);
         match (next_root, vite_root) {
@@ -130,6 +155,7 @@ impl ProjectHints {
                 next_role(strip_root(rel_path, next))
             }
             (_, Some(vite)) => vite_role(strip_root(rel_path, vite)),
+            _ if rel_path.starts_with("api/") => FileRole::ServerCode,
             _ => FileRole::UnknownCode,
         }
     }
@@ -139,11 +165,14 @@ fn next_role(path: &str) -> FileRole {
     let path = path.strip_prefix("src/").unwrap_or(path);
     let name = file_name(path);
     let stem = name.split('.').next().unwrap_or(name);
-    if path.starts_with("pages/api/")
-        || (path.starts_with("app/") && stem == "route")
+    if path.starts_with("app/")
+        || path.starts_with("pages/api/")
+        || (path.starts_with("pages/") && stem == "_document")
         || (!path.contains('/') && (stem == "middleware" || stem == "instrumentation"))
     {
         FileRole::ServerCode
+    } else if path.starts_with("pages/") {
+        FileRole::BrowserCode
     } else if !path.contains('/') && name.contains(".config.") {
         FileRole::Other
     } else {
@@ -154,11 +183,17 @@ fn next_role(path: &str) -> FileRole {
 fn vite_role(path: &str) -> FileRole {
     if path.starts_with("src/") {
         FileRole::BrowserCode
+    } else if path.starts_with("api/") || path.starts_with("server/") {
+        FileRole::ServerCode
     } else if !path.contains('/') && file_name(path).contains(".config.") {
         FileRole::Other
     } else {
         FileRole::UnknownCode
     }
+}
+
+fn has_root(rel_path: &str, root: &str) -> bool {
+    root.is_empty() || has_prefix_dir(rel_path, root)
 }
 
 fn content_of(name: &str) -> Option<Content> {
@@ -270,7 +305,44 @@ mod tests {
             Some(FileRole::ServerCode)
         );
         assert_eq!(role(&hints, "middleware.ts"), Some(FileRole::ServerCode));
-        assert_eq!(role(&hints, "app/page.tsx"), Some(FileRole::UnknownCode));
+        assert_eq!(role(&hints, "app/page.tsx"), Some(FileRole::ServerCode));
+        assert_eq!(
+            role(&hints, "src/app/(shop)/cart/page.tsx"),
+            Some(FileRole::ServerCode)
+        );
+        assert_eq!(role(&hints, "pages/index.tsx"), Some(FileRole::BrowserCode));
+        assert_eq!(
+            role(&hints, "pages/_document.tsx"),
+            Some(FileRole::ServerCode)
+        );
+        assert_eq!(role(&hints, "lib/db.ts"), Some(FileRole::UnknownCode));
+    }
+
+    #[test]
+    fn next_env_types_mark_a_next_project_without_a_config() {
+        let hints = ProjectHints::from_paths(["next-env.d.ts"].into_iter());
+        assert_eq!(
+            role(&hints, "app/api/webhooks/route.ts"),
+            Some(FileRole::ServerCode)
+        );
+        assert_eq!(role(&hints, "next-env.d.ts"), Some(FileRole::UnknownCode));
+    }
+
+    #[test]
+    fn public_assets_and_server_folders_are_recognized() {
+        let hints = ProjectHints::from_paths(["vite.config.ts"].into_iter());
+        assert_eq!(
+            role(&hints, "public/config.json"),
+            Some(FileRole::BrowserCode)
+        );
+        assert_eq!(role(&hints, "index.html"), Some(FileRole::BrowserCode));
+        assert_eq!(role(&hints, "docs/index.html"), Some(FileRole::Other));
+        assert_eq!(role(&hints, "api/checkout.ts"), Some(FileRole::ServerCode));
+        assert_eq!(role(&hints, "server/index.ts"), Some(FileRole::ServerCode));
+        assert_eq!(
+            role(&hints, "netlify/functions/pay.ts"),
+            Some(FileRole::ServerCode)
+        );
     }
 
     #[test]
