@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use seethru_core::{
-    Finding, Location, MaskedSecret, Node, NodeId, NodeKind, RuleId, SCHEMA_VERSION, ScanReport,
-    SecretKind, Severity, Summary, TargetInfo, ToolInfo,
+    Finding, LocalizedText, Location, MaskedSecret, Node, NodeId, NodeKind, RuleId, SCHEMA_VERSION,
+    ScanReport, SecretKind, Severity, Summary, TargetInfo, ToolInfo,
 };
 
 use super::{CLOSING, attach_fix_prompts, fix_prompt};
@@ -89,8 +89,14 @@ fn secret_report(label: &str) -> (ScanReport, String) {
         id: "secret-in-source-code:secret:a".to_owned(),
         rule: RuleId::SecretInSourceCode,
         severity: Severity::High,
-        title: "t".to_owned(),
-        explanation: "e".to_owned(),
+        title: LocalizedText {
+            en: "t".to_owned(),
+            ko: "t".to_owned(),
+        },
+        explanation: LocalizedText {
+            en: "e".to_owned(),
+            ko: "e".to_owned(),
+        },
         node: node.id.clone(),
         location: Some(Location {
             path: "src/pay`ment\n.ts".to_owned(),

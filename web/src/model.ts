@@ -61,19 +61,26 @@ export interface ReportEdge {
   kind: EdgeKind;
 }
 
+export interface LocalizedText {
+  en: string;
+  ko: string;
+}
+
 export interface Finding {
   id: string;
   rule: string;
   severity: Severity;
-  title: string;
-  explanation: string;
+  title: LocalizedText;
+  explanation: LocalizedText;
   node: string;
   location?: Location;
   fixPrompt?: string;
 }
 
+export const SCHEMA_VERSION = 2;
+
 export interface ScanReport {
-  schemaVersion: 1;
+  schemaVersion: typeof SCHEMA_VERSION;
   tool: { name: string; version: string };
   target: { name: string; filesScanned: number; filesSkipped: number; truncated: boolean };
   summary: Record<Severity, number>;
@@ -137,6 +144,11 @@ function list(value: unknown, path: string, max: number): unknown[] {
   return value;
 }
 
+function localized(value: unknown, path: string): LocalizedText {
+  const o = object(value, path, ["en", "ko"]);
+  return { en: text(o.en, `${path}.en`), ko: text(o.ko, `${path}.ko`) };
+}
+
 function location(value: unknown, path: string): Location {
   const o = object(value, path, ["path", "line", "column"]);
   return { path: text(o.path, `${path}.path`), line: count(o.line, `${path}.line`), column: count(o.column, `${path}.column`) };
@@ -181,7 +193,7 @@ function nodeKind(value: unknown, path: string): NodeKind {
 
 export function parseScanReport(input: unknown): ScanReport {
   const root = object(input, "report", ["schemaVersion", "tool", "target", "summary", "nodes", "edges", "findings"]);
-  if (root.schemaVersion !== 1) fail("report.schemaVersion", "version 1 expected");
+  if (root.schemaVersion !== SCHEMA_VERSION) fail("report.schemaVersion", `version ${SCHEMA_VERSION} expected`);
 
   const tool = object(root.tool, "report.tool", ["name", "version"]);
   const target = object(root.target, "report.target", ["name", "filesScanned", "filesSkipped", "truncated"]);
@@ -215,8 +227,8 @@ export function parseScanReport(input: unknown): ScanReport {
       id: text(o.id, `${path}.id`),
       rule: text(o.rule, `${path}.rule`),
       severity: oneOf(o.severity, `${path}.severity`, SEVERITIES),
-      title: text(o.title, `${path}.title`),
-      explanation: text(o.explanation, `${path}.explanation`),
+      title: localized(o.title, `${path}.title`),
+      explanation: localized(o.explanation, `${path}.explanation`),
       node: known(o.node, `${path}.node`),
     };
     if (o.location !== undefined) finding.location = location(o.location, `${path}.location`);
@@ -225,7 +237,7 @@ export function parseScanReport(input: unknown): ScanReport {
   });
 
   return {
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
     tool: { name: text(tool.name, "report.tool.name"), version: text(tool.version, "report.tool.version") },
     target: {
       name: text(target.name, "report.target.name"),

@@ -48,7 +48,7 @@
       "additionalProperties": false,
       "properties": {
         "explanation": {
-          "type": "string"
+          "$ref": "#/$defs/LocalizedText"
         },
         "fixPrompt": {
           "type": [
@@ -79,7 +79,7 @@
           "$ref": "#/$defs/Severity"
         },
         "title": {
-          "type": "string"
+          "$ref": "#/$defs/LocalizedText"
         }
       },
       "required": [
@@ -89,6 +89,22 @@
         "title",
         "explanation",
         "node"
+      ],
+      "type": "object"
+    },
+    "LocalizedText": {
+      "additionalProperties": false,
+      "properties": {
+        "en": {
+          "type": "string"
+        },
+        "ko": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "en",
+        "ko"
       ],
       "type": "object"
     },

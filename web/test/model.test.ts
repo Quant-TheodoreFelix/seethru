@@ -4,7 +4,7 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     tool: { name: "seethru", version: "0.1.0" },
     target: { name: "app", filesScanned: 2, filesSkipped: 0, truncated: false },
     summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
@@ -23,8 +23,8 @@ function validReport(): Record<string, unknown> {
         id: "supabase-rls-disabled:table:public.todos",
         rule: "supabase-rls-disabled",
         severity: "critical",
-        title: "t",
-        explanation: "e",
+        title: { en: "t", ko: "제목" },
+        explanation: { en: "e", ko: "설명" },
         node: "table:public.todos",
       },
     ],
@@ -42,6 +42,18 @@ test("rejects unknown fields", () => {
   const report = validReport();
   report.extra = true;
   assert.throws(() => parseScanReport(report), ReportError);
+});
+
+test("reads finding texts in both languages and rejects anything else", () => {
+  const report = parseScanReport(validReport());
+  assert.deepEqual(report.findings[0]?.title, { en: "t", ko: "제목" });
+
+  const finding = (validReport().findings as Record<string, unknown>[])[0];
+  for (const title of ["t", { en: "t" }, { en: "t", ko: "제목", ja: "x" }, { en: "t", ko: 1 }]) {
+    const broken = validReport();
+    broken.findings = [{ ...finding, title }];
+    assert.throws(() => parseScanReport(broken), ReportError);
+  }
 });
 
 test("rejects edges and findings that point at missing nodes", () => {
@@ -65,7 +77,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 2 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 1 }), /version 2 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 3 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });

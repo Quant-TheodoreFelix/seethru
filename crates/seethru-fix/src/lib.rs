@@ -62,7 +62,7 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding) -> String {
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
             Some(NodeKind::Secret { secret_kind, .. }),
         ) => secret(finding.rule, *secret_kind, &place),
-        _ => format!("{}{place}", clean(&finding.title)),
+        _ => format!("{}{place}", clean(&finding.title.en)),
     };
     format!("{body}\n{CLOSING}")
 }

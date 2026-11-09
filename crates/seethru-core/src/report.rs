@@ -3,9 +3,9 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::MaskedSecret;
+use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -264,8 +264,8 @@ pub struct Finding {
     pub id: String,
     pub rule: RuleId,
     pub severity: Severity,
-    pub title: String,
-    pub explanation: String,
+    pub title: LocalizedText,
+    pub explanation: LocalizedText,
     pub node: NodeId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,

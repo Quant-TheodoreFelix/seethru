@@ -223,10 +223,10 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                   <SeverityTag severity={finding.severity} />
                 </span>
                 <span className="finding-title">
-                  <InlineText text={finding.title} />
+                  <InlineText text={finding.title.en} />
                 </span>
                 <span className="finding-text">
-                  <InlineText text={finding.explanation} />
+                  <InlineText text={finding.explanation.en} />
                 </span>
                 {finding.location ? (
                   <span className="finding-where">
@@ -290,7 +290,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                   </button>
                 </div>
                 <h3>
-                  <InlineText text={selected.title} />
+                  <InlineText text={selected.title.en} />
                 </h3>
                 {selected.location ? (
                   <p className="where">

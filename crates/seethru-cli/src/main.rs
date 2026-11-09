@@ -236,7 +236,7 @@ fn print_summary(out: &mut impl Write, report: &ScanReport) -> io::Result<()> {
             out,
             "[{}] {}",
             severity_label(finding.severity),
-            finding.title
+            finding.title.en
         )?;
         writeln!(out, "  {place}")?;
     }
