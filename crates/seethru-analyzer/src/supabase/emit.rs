@@ -5,7 +5,7 @@ use seethru_core::{
 
 use super::{
     ANONYMOUS_ROLES, Condition, DEFAULT_SCHEMA, EXPOSED_SCHEMAS, MANAGED_SCHEMAS, Migrations,
-    Policy, SIGNED_IN_ROLES, TableKey,
+    Policy, SIGNED_IN_ROLES, TableKey, View,
 };
 use crate::classify::FileRole;
 use crate::graph::{Graph, Verdict, file_location, file_step, step};
@@ -69,6 +69,7 @@ impl Migrations {
         }
 
         self.emit_buckets(graph);
+        self.emit_views(graph);
         for ((key, name), policy) in &self.policies {
             if key.schema == "storage" && key.name == "objects" {
                 self.emit_storage_policy(graph, name, policy);
@@ -235,7 +236,67 @@ impl Migrations {
             evidence,
         );
     }
+
+    fn emit_views(&self, graph: &mut Graph) {
+        for (key, view) in &self.views {
+            if MANAGED_SCHEMAS.contains(&key.schema.as_str()) {
+                continue;
+            }
+            let view_id = table_id(key);
+            let label = table_label(key);
+            graph.add_node(Node {
+                id: view_id.clone(),
+                label: label.clone(),
+                kind: NodeKind::DataStore {
+                    detail: Some(DataStoreDetail::PostgresView {
+                        schema: key.schema.clone(),
+                        security_invoker: view.security_invoker,
+                        materialized: view.materialized,
+                    }),
+                },
+                zone: Zone::Database,
+                location: Some(view.defined_at.clone()),
+            });
+            let path = &view.defined_at.path;
+            let file_id = graph.add_file(path, FileRole::Migration, Basis::Path);
+            graph.add_edge(file_id, view_id.clone(), EdgeKind::Defines);
+            if let Some(verdict) = view_verdict(key, view) {
+                let facts = rules::ViewFacts {
+                    anyone: view.readers.anyone(),
+                    materialized: view.materialized,
+                    auth_users: reads_auth_users(view),
+                    checks_caller: view.checks_caller,
+                };
+                let mut evidence = vec![
+                    file_step(path, None, file_location(path)),
+                    step(
+                        &label,
+                        Some(EdgeKind::Defines),
+                        Some(view_id.clone()),
+                        Some(view.defined_at.clone()),
+                    ),
+                ];
+                for read in view.reads.iter().take(MAX_VIEW_READS) {
+                    evidence.push(step(
+                        &table_label(read),
+                        Some(EdgeKind::Reads),
+                        Some(table_id(read)),
+                        Some(view.defined_at.clone()),
+                    ));
+                }
+                graph.add_finding(
+                    verdict,
+                    rules::view_bypasses_rls(&label, &facts),
+                    view_id,
+                    Some(view.defined_at.clone()),
+                    evidence,
+                );
+            }
+        }
+    }
 }
+
+const MAX_VIEW_READS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reach {
@@ -325,4 +386,36 @@ fn reach_of(roles: &[String], signed_in: bool) -> Option<Reach> {
     } else {
         None
     }
+}
+
+fn reads_auth_users(view: &View) -> bool {
+    view.reads
+        .iter()
+        .any(|read| read.schema == "auth" && read.name == "users")
+}
+
+fn view_verdict(key: &TableKey, view: &View) -> Option<Verdict> {
+    let bypasses = view.materialized || !view.security_invoker;
+    if !EXPOSED_SCHEMAS.contains(&key.schema.as_str()) || !bypasses || !view.owner_is_admin {
+        return None;
+    }
+    let anyone = view.readers.anyone();
+    if !anyone && !view.readers.signed_in() {
+        return None;
+    }
+    let (severity, confidence) = if view.checks_caller {
+        (Severity::Low, Confidence::Review)
+    } else if reads_auth_users(view) {
+        (Severity::Critical, Confidence::Certain)
+    } else if anyone {
+        (Severity::High, Confidence::Certain)
+    } else {
+        (Severity::Medium, Confidence::Certain)
+    };
+    Some(Verdict {
+        rule: RuleId::SupabaseViewBypassesRls,
+        severity,
+        confidence,
+        from_build: false,
+    })
 }

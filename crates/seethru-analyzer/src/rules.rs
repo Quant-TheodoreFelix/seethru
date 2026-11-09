@@ -146,6 +146,13 @@ pub(crate) fn table_schema_missing(table: &str) -> Text {
     }
 }
 
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 fn who(anyone: bool) -> (&'static str, &'static str) {
     if anyone {
         (
@@ -154,6 +161,88 @@ fn who(anyone: bool) -> (&'static str, &'static str) {
         )
     } else {
         ("any signed-in user", "로그인한 사용자라면 누구나")
+    }
+}
+
+pub(crate) struct ViewFacts {
+    pub anyone: bool,
+    pub materialized: bool,
+    pub auth_users: bool,
+    pub checks_caller: bool,
+}
+
+pub(crate) fn view_bypasses_rls(view: &str, facts: &ViewFacts) -> Text {
+    let view = display_name(view);
+    let (who_en, who_ko) = who(facts.anyone);
+    let (title_en, title_ko) = if facts.auth_users {
+        (
+            format!("The `{view}` view shows the accounts of your users"),
+            format!("`{view}` 뷰가 회원 계정 정보를 보여 주고 있어요"),
+        )
+    } else {
+        (
+            format!("The `{view}` view shows rows that RLS would hide"),
+            format!("`{view}` 뷰가 RLS가 가려야 할 행을 보여 주고 있어요"),
+        )
+    };
+    let (how_en, how_ko) = if facts.materialized {
+        (
+            format!(
+                "A materialized view keeps its own copy of the rows and has no RLS, so {who_en} can read every row in it through the Supabase API."
+            ),
+            format!(
+                "materialized view는 행을 따로 복사해 두고 RLS가 없어서, {who_ko} Supabase API로 이 뷰의 모든 행을 읽을 수 있어요."
+            ),
+        )
+    } else {
+        (
+            format!(
+                "A view runs with the rights of the account that created it unless it is made with `security_invoker`, \
+                 so the RLS policies of the tables behind it do not apply. {} can read it through the Supabase API and see every row it returns.",
+                capitalized(who_en)
+            ),
+            format!(
+                "뷰는 `security_invoker`로 만들지 않으면 만든 계정의 권한으로 실행돼서, 뷰가 읽는 테이블의 RLS 정책이 적용되지 않아요. \
+                 {who_ko} Supabase API로 이 뷰를 읽어 뷰가 돌려주는 모든 행을 볼 수 있어요."
+            ),
+        )
+    };
+    let (users_en, users_ko) = if facts.auth_users {
+        (
+            " It reads `auth.users`, which holds the email address and other account details of every user.",
+            " 이 뷰는 모든 회원의 이메일 주소 같은 계정 정보가 담긴 `auth.users`를 읽어요.",
+        )
+    } else {
+        ("", "")
+    };
+    let (caller_en, caller_ko) = if facts.checks_caller {
+        (
+            " The view looks at who is asking, for example with `auth.uid()`, so it may already show each user only their own rows. Check that it does.",
+            " 이 뷰는 `auth.uid()` 같은 방법으로 누가 읽는지 확인하고 있어서 이미 본인 행만 보여 줄 수도 있어요. 정말 그런지 확인하세요.",
+        )
+    } else {
+        ("", "")
+    };
+    let (fix_en, fix_ko) = if facts.materialized {
+        (
+            " Move it to a schema that the API does not expose, or take away the right to read it from signed-out and signed-in users.",
+            " API가 공개하지 않는 스키마로 옮기거나, 로그인하지 않은 사용자와 로그인한 사용자에게서 읽기 권한을 거두세요.",
+        )
+    } else {
+        (
+            " Make it again with `security_invoker` so RLS applies to the person who reads it, or take away the right to read it.",
+            " `security_invoker`로 다시 만들어 읽는 사람 기준으로 RLS가 적용되게 하거나, 읽기 권한을 거두세요.",
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: title_en,
+            ko: title_ko,
+        },
+        explanation: LocalizedText {
+            en: format!("{how_en}{users_en}{caller_en}{fix_en}"),
+            ko: format!("{how_ko}{users_ko}{caller_ko}{fix_ko}"),
+        },
     }
 }
 
@@ -414,9 +503,9 @@ mod tests {
     use seethru_core::{PolicyCommand, SecretKind};
 
     use super::{
-        Text, display_name, policy_unrestricted, rls_disabled, secret_in_browser,
+        Text, ViewFacts, display_name, policy_unrestricted, rls_disabled, secret_in_browser,
         secret_in_public_env, secret_in_source, service_role_in_browser,
-        storage_policy_unrestricted, table_schema_missing,
+        storage_policy_unrestricted, table_schema_missing, view_bypasses_rls,
     };
 
     const SECRET_KINDS: [SecretKind; 9] = [
@@ -451,6 +540,19 @@ mod tests {
             }
         }
         for anyone in [true, false] {
+            for checks_caller in [true, false] {
+                for materialized in [true, false] {
+                    for auth_users in [true, false] {
+                        let facts = ViewFacts {
+                            anyone,
+                            materialized,
+                            auth_users,
+                            checks_caller,
+                        };
+                        texts.push(view_bypasses_rls("order_totals", &facts));
+                    }
+                }
+            }
             for command in COMMANDS {
                 for buckets in [
                     Vec::new(),

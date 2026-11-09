@@ -399,3 +399,82 @@ fn storage_policies_for_service_role_or_restrictive_are_not_reported() {
         findings(&report)
     );
 }
+
+const API: &str = "supabase/migrations/3_api.sql";
+const TABLES: &str = "create table public.orders (id bigint, user_id uuid);
+     alter table public.orders enable row level security;";
+
+#[test]
+fn views_that_skip_rls_are_reported_by_who_can_read_them() {
+    let report = run(&[(
+        API,
+        &format!(
+            "{TABLES}
+             create view public.order_totals as select o.user_id, count(*) from public.orders o group by 1;
+             create view public.my_orders with (security_invoker = true) as select * from public.orders;
+             create materialized view public.order_cache as select * from orders;
+             create view public.members as select id, email from auth.users;
+             create view public.staff_orders as select * from public.orders;
+             revoke select on public.staff_orders from anon;
+             create view public.hidden_orders as select * from public.orders;
+             revoke all on public.hidden_orders from anon, authenticated;
+             create view public.mine as select * from public.orders where user_id = auth.uid();"
+        ),
+    )]);
+    let rule = RuleId::SupabaseViewBypassesRls;
+    let severity = |id: &str| finding(&report, rule, id).map(|f| (f.severity, f.confidence));
+    assert_eq!(
+        severity("table:public.order_totals"),
+        Some((Severity::High, Confidence::Certain))
+    );
+    assert_eq!(severity("table:public.my_orders"), None);
+    assert_eq!(
+        severity("table:public.order_cache"),
+        Some((Severity::High, Confidence::Certain))
+    );
+    assert_eq!(
+        severity("table:public.members"),
+        Some((Severity::Critical, Confidence::Certain))
+    );
+    assert_eq!(
+        severity("table:public.staff_orders"),
+        Some((Severity::Medium, Confidence::Certain))
+    );
+    assert_eq!(severity("table:public.hidden_orders"), None);
+    assert_eq!(
+        severity("table:public.mine"),
+        Some((Severity::Low, Confidence::Review))
+    );
+    assert_eq!(
+        node_kind(&report, "table:public.order_cache"),
+        Some(&NodeKind::DataStore {
+            detail: Some(DataStoreDetail::PostgresView {
+                schema: "public".to_owned(),
+                security_invoker: false,
+                materialized: true,
+            })
+        })
+    );
+    assert!(has_edge(
+        &report,
+        "file:supabase/migrations/3_api.sql",
+        "table:public.order_totals",
+        EdgeKind::Defines
+    ));
+    let steps: Vec<Option<&str>> = finding(&report, rule, "table:public.order_totals")
+        .map(|f| {
+            f.evidence
+                .iter()
+                .map(|s| s.node.as_ref().map(|n| n.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        steps,
+        vec![
+            Some("file:supabase/migrations/3_api.sql"),
+            Some("table:public.order_totals"),
+            Some("table:public.orders")
+        ]
+    );
+}

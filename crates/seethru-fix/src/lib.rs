@@ -82,6 +82,22 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             storage_policy_unrestricted(&clean(label), *command, &roles, &buckets, &place, lang)
         }
         (
+            RuleId::SupabaseViewBypassesRls,
+            Some(NodeKind::DataStore {
+                detail:
+                    Some(DataStoreDetail::PostgresView {
+                        schema,
+                        materialized,
+                        ..
+                    }),
+            }),
+        ) => {
+            let name = label.rsplit('.').next().unwrap_or(label);
+            let view = format!("{}.{}", clean(schema), clean(name));
+            let users = related_files(report, finding, &[EdgeKind::Reads, EdgeKind::Writes], lang);
+            view_bypasses_rls(&view, *materialized, &place, &users, lang)
+        }
+        (
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
             Some(NodeKind::Credential {
                 detail: CredentialDetail::Secret { secret_kind, .. },
@@ -217,6 +233,43 @@ fn storage_policy_unrestricted(
                  4. 모두에게 공개하려고 일부러 만든 파일이라면 정책을 바꾸지 말고 그렇다고 알려 줘."
             )
         }
+    }
+}
+
+fn view_bypasses_rls(
+    view: &str,
+    materialized: bool,
+    place: &str,
+    users: &str,
+    lang: Lang,
+) -> String {
+    match (lang, materialized) {
+        (Lang::En, false) => format!(
+            "The Supabase view `{view}` runs with the rights of the account that created it, so it skips the RLS policies of the tables it reads, and anyone who can use the API can read every row it returns.{place}{users}\n\
+             1. Create a new migration file that adds `alter view {view} set (security_invoker = true);` so the view follows the RLS policies of the person who reads it.\n\
+             2. Check that the tables behind the view have policies that let the right users read their rows, because the view will now return only what RLS allows.\n\
+             3. If no one outside the database should read this view, also add `revoke select on {view} from anon, authenticated;`.\n\
+             4. Do not edit migration files that have already been applied."
+        ),
+        (Lang::En, true) => format!(
+            "The Supabase materialized view `{view}` keeps its own copy of the rows and has no RLS, so anyone who can use the API can read every row in it.{place}{users}\n\
+             1. Create a new migration file that adds `revoke select on {view} from anon, authenticated;`, or move the view to a schema that the API does not expose.\n\
+             2. If the app needs these rows, read them through a normal view with `security_invoker = true` or a function that checks the caller.\n\
+             3. Do not edit migration files that have already been applied."
+        ),
+        (Lang::Ko, false) => format!(
+            "Supabase 뷰 `{view}`는 만든 계정의 권한으로 실행돼서 뷰가 읽는 테이블의 RLS 정책을 건너뛰고, API를 쓸 수 있는 사람은 누구나 이 뷰가 돌려주는 모든 행을 읽을 수 있어.{place}{users}\n\
+             1. 새 마이그레이션 파일을 만들어서 `alter view {view} set (security_invoker = true);`를 추가해 줘. 그러면 뷰가 읽는 사람 기준으로 RLS 정책을 따르게 돼.\n\
+             2. 이제 뷰는 RLS가 허용하는 행만 돌려주니까, 뷰가 읽는 테이블에 알맞은 사용자가 자기 행을 읽을 수 있는 정책이 있는지 확인해 줘.\n\
+             3. 데이터베이스 바깥에서 이 뷰를 읽을 필요가 없다면 `revoke select on {view} from anon, authenticated;`도 추가해 줘.\n\
+             4. 이미 적용된 마이그레이션 파일은 고치지 마."
+        ),
+        (Lang::Ko, true) => format!(
+            "Supabase materialized view `{view}`는 행을 따로 복사해 두고 RLS가 없어서, API를 쓸 수 있는 사람은 누구나 이 뷰의 모든 행을 읽을 수 있어.{place}{users}\n\
+             1. 새 마이그레이션 파일을 만들어서 `revoke select on {view} from anon, authenticated;`를 추가하거나, API가 공개하지 않는 스키마로 뷰를 옮겨 줘.\n\
+             2. 앱에서 이 행이 필요하다면 `security_invoker = true`인 일반 뷰나 부른 사람을 확인하는 함수를 거쳐 읽게 해 줘.\n\
+             3. 이미 적용된 마이그레이션 파일은 고치지 마."
+        ),
     }
 }
 
