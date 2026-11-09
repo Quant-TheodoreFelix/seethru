@@ -1,5 +1,5 @@
 import type { Lang } from "./lang";
-import type { EdgeKind, FileRole, NodeKind, PolicyCommand, SecretKind, Severity } from "./model";
+import type { EdgeKind, FileRole, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity } from "./model";
 import type { Theme } from "./theme";
 
 export interface Messages {
@@ -16,7 +16,7 @@ export interface Messages {
   policy: string;
   envVar: string;
   publicInBrowser: string;
-  scanned: (files: number, truncated: boolean) => string;
+  scanned: (target: ScanReport["target"]) => string;
   colorTheme: string;
   languageSwitch: string;
   openTitle: string;
@@ -35,6 +35,11 @@ export interface Messages {
   copy: string;
   copied: string;
   copyBlocked: string;
+  acceptedTitle: string;
+  acceptedNote: (config: string) => string;
+  acceptedLabel: string;
+  reason: string;
+  findingId: string;
 }
 
 const LANGUAGE: Record<Lang, string> = { en: "EN", ko: "KO" };
@@ -79,8 +84,14 @@ const en: Messages = {
   policy: "Policy",
   envVar: "Env variable",
   publicInBrowser: "public in browser",
-  scanned: (files, truncated) =>
-    `${files} ${files === 1 ? "file" : "files"} scanned${truncated ? ", stopped early" : ""}`,
+  scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
+    [
+      `${filesScanned} ${filesScanned === 1 ? "file" : "files"} scanned`,
+      filesExcluded > 0 ? `${filesExcluded} excluded by ${configFile ?? "seethru.toml"}` : "",
+      truncated ? "stopped early" : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
   colorTheme: "Color theme",
   languageSwitch: "Language",
   openTitle: "Open a scan report",
@@ -99,6 +110,11 @@ const en: Messages = {
   copy: "Copy prompt",
   copied: "Copied",
   copyBlocked: "The browser blocked copying. The prompt is selected, so copy it yourself.",
+  acceptedTitle: "Accepted",
+  acceptedNote: (config) => `Marked as intended in ${config}. They do not count toward the totals above.`,
+  acceptedLabel: "Accepted",
+  reason: "Reason:",
+  findingId: "Finding ID",
 };
 
 const ko: Messages = {
@@ -141,7 +157,14 @@ const ko: Messages = {
   policy: "정책",
   envVar: "환경변수",
   publicInBrowser: "브라우저에 공개",
-  scanned: (files, truncated) => `파일 ${files}개 검사${truncated ? ", 일부만 검사함" : ""}`,
+  scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
+    [
+      `파일 ${filesScanned}개 검사`,
+      filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
+      truncated ? "일부만 검사함" : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
   colorTheme: "색 테마",
   languageSwitch: "언어",
   openTitle: "스캔 리포트 열기",
@@ -160,6 +183,11 @@ const ko: Messages = {
   copy: "프롬프트 복사",
   copied: "복사했어요",
   copyBlocked: "브라우저가 자동 복사를 막았어요. 프롬프트를 선택해 두었으니 직접 복사해 주세요.",
+  acceptedTitle: "허용한 문제",
+  acceptedNote: (config) => `${config}에서 의도한 것으로 표시했어요. 위 개수에는 들어가지 않아요.`,
+  acceptedLabel: "허용함",
+  reason: "사유:",
+  findingId: "문제 ID",
 };
 
 export const MESSAGES: Record<Lang, Messages> = { en, ko };

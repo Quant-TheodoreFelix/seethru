@@ -69,7 +69,7 @@ export function App() {
                   <span className="target-name" title={report.target.name}>
                     {report.target.name}
                   </span>
-                  <span className="target-meta">{m.scanned(report.target.filesScanned, report.target.truncated)}</span>
+                  <span className="target-meta">{m.scanned(report.target)}</span>
                 </>
               ) : null}
             </div>
@@ -186,7 +186,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [layoutError, setLayoutError] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
-  const list = useRef<HTMLOListElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const flow = useReactFlow<GraphNode>();
   const lang = useCurrentLang();
   const m = useMessages();
@@ -217,6 +217,8 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   }, [selectedId]);
 
   const selected = useMemo(() => report.findings.find((finding) => finding.id === selectedId), [report, selectedId]);
+  const open = useMemo(() => report.findings.filter((finding) => !finding.accepted), [report]);
+  const accepted = useMemo(() => report.findings.filter((finding) => finding.accepted), [report]);
   const edgeKinds = useMemo(() => edgeKindsIn(report), [report]);
 
   const focus = useCallback(
@@ -238,37 +240,42 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
       <aside className="sidebar" aria-label={m.findings}>
         <div className="sidebar-head">
           <h2>{m.findings}</h2>
-          <span className="sidebar-count">{report.findings.length}</span>
+          <span className="sidebar-count">{open.length}</span>
         </div>
-        {report.findings.length === 0 ? <p className="empty">{m.noProblems}</p> : null}
-        <ol className="findings" ref={list}>
-          {report.findings.map((finding, index) => (
-            <li key={finding.id} data-finding={finding.id}>
-              <button
-                type="button"
-                className={`finding ${finding.id === selectedId ? "is-active" : ""}`}
-                aria-current={finding.id === selectedId ? "true" : undefined}
-                onClick={() => focus(finding)}
-              >
-                <span className="finding-meta">
-                  <span className="finding-index">{String(index + 1).padStart(2, "0")}</span>
-                  <SeverityTag severity={finding.severity} />
-                </span>
-                <span className="finding-title">
-                  <InlineText text={finding.title[lang]} />
-                </span>
-                <span className="finding-text">
-                  <InlineText text={finding.explanation[lang]} />
-                </span>
-                {finding.location ? (
-                  <span className="finding-where">
-                    {finding.location.path}:{finding.location.line}
-                  </span>
-                ) : null}
-              </button>
-            </li>
-          ))}
-        </ol>
+        {open.length === 0 ? <p className="empty">{m.noProblems}</p> : null}
+        <div ref={list}>
+          <ol className="findings">
+            {open.map((finding, index) => (
+              <FindingRow
+                key={finding.id}
+                finding={finding}
+                label={String(index + 1).padStart(2, "0")}
+                active={finding.id === selectedId}
+                onSelect={focus}
+              />
+            ))}
+          </ol>
+          {accepted.length > 0 ? (
+            <section className="accepted" aria-label={m.acceptedTitle}>
+              <div className="accepted-head">
+                <h3>{m.acceptedTitle}</h3>
+                <span className="sidebar-count">{accepted.length}</span>
+              </div>
+              <p className="accepted-note">{m.acceptedNote(report.target.configFile ?? "seethru.toml")}</p>
+              <ol className="findings">
+                {accepted.map((finding) => (
+                  <FindingRow
+                    key={finding.id}
+                    finding={finding}
+                    label={m.acceptedLabel}
+                    active={finding.id === selectedId}
+                    onSelect={focus}
+                  />
+                ))}
+              </ol>
+            </section>
+          ) : null}
+        </div>
       </aside>
       <main className="stage">
         <dl className="summary">
@@ -329,6 +336,15 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                     {selected.location.path}:{selected.location.line}
                   </p>
                 ) : null}
+                {selected.accepted ? (
+                  <p className="accepted-reason">
+                    <span>{m.acceptedLabel}</span> {selected.accepted.reason}
+                  </p>
+                ) : null}
+                <p className="finding-id">
+                  <span>{m.findingId}</span>
+                  <code>{selected.id}</code>
+                </p>
                 {selected.fixPrompt ? <FixPrompt key={`${selected.id}:${lang}`} prompt={selected.fixPrompt[lang]} /> : null}
               </motion.section>
             ) : null}
@@ -336,6 +352,53 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
         </div>
       </main>
     </div>
+  );
+}
+
+function FindingRow({
+  finding,
+  label,
+  active,
+  onSelect,
+}: {
+  finding: Finding;
+  label: string;
+  active: boolean;
+  onSelect: (finding: Finding) => void;
+}) {
+  const lang = useCurrentLang();
+  const m = useMessages();
+  return (
+    <li data-finding={finding.id}>
+      <button
+        type="button"
+        className={`finding ${active ? "is-active" : ""} ${finding.accepted ? "is-accepted" : ""}`}
+        aria-current={active ? "true" : undefined}
+        onClick={() => onSelect(finding)}
+      >
+        <span className="finding-meta">
+          <span className="finding-index">{label}</span>
+          <SeverityTag severity={finding.severity} />
+        </span>
+        <span className="finding-title">
+          <InlineText text={finding.title[lang]} />
+        </span>
+        {finding.accepted ? (
+          <span className="finding-reason">
+            {m.reason} {finding.accepted.reason}
+          </span>
+        ) : (
+          <span className="finding-text">
+            <InlineText text={finding.explanation[lang]} />
+          </span>
+        )}
+        {finding.location ? (
+          <span className="finding-where">
+            {finding.location.path}:{finding.location.line}
+          </span>
+        ) : null}
+      </button>
+    </li>
   );
 }
 

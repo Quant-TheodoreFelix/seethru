@@ -22,7 +22,10 @@ test("starts in the language the page was written in", () => {
 
 function strings(value: unknown, path: string): [string, string][] {
   if (typeof value === "string") return [[path, value]];
-  if (typeof value === "function") return [[path, String(value(2, true))]];
+  if (typeof value === "function") {
+    const target = { name: "app", filesScanned: 2, filesSkipped: 0, filesExcluded: 1, truncated: true };
+    return [[path, String(value.length === 1 && path.endsWith("scanned") ? value(target) : value("x"))]];
+  }
   return Object.entries(value as Record<string, unknown>).flatMap(([key, inner]) => strings(inner, `${path}.${key}`));
 }
 
@@ -37,9 +40,13 @@ test("both languages fill every message", () => {
     assert.ok(text.trim().length > 0, path);
     assert.ok(!text.includes("—"), path);
   }
-  assert.equal(MESSAGES.en.scanned(1, false), "1 file scanned");
-  assert.equal(MESSAGES.en.scanned(3, true), "3 files scanned, stopped early");
-  assert.equal(MESSAGES.ko.scanned(3, false), "파일 3개 검사");
+  const target = { name: "app", filesScanned: 1, filesSkipped: 0, filesExcluded: 0, truncated: false };
+  assert.equal(MESSAGES.en.scanned(target), "1 file scanned");
+  assert.equal(
+    MESSAGES.en.scanned({ ...target, filesScanned: 3, filesExcluded: 2, truncated: true, configFile: "seethru.toml" }),
+    "3 files scanned, 2 excluded by seethru.toml, stopped early",
+  );
+  assert.equal(MESSAGES.ko.scanned({ ...target, filesScanned: 3, filesExcluded: 2 }), "파일 3개 검사, seethru.toml로 2개 제외");
 });
 
 test("labels graph nodes in the chosen language", () => {

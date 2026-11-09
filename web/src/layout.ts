@@ -29,6 +29,7 @@ const LAYOUT_OPTIONS: Record<string, string> = {
 export async function layoutReport(report: ScanReport): Promise<{ nodes: GraphNode[]; edges: Edge[] }> {
   const findingsByNode = new Map<string, Finding[]>();
   for (const finding of report.findings) {
+    if (finding.accepted) continue;
     const bucket = findingsByNode.get(finding.node);
     if (bucket) bucket.push(finding);
     else findingsByNode.set(finding.node, [finding]);

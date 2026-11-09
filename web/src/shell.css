@@ -165,6 +165,57 @@
   background: rgb(20 20 19 / 0.08);
 }
 
+.finding.is-accepted .finding-title {
+  color: var(--muted);
+}
+
+.finding.is-accepted .tag::before {
+  opacity: 0.4;
+}
+
+.finding.is-accepted.is-active .finding-title {
+  color: inherit;
+}
+
+.finding-reason {
+  color: var(--muted);
+  font-size: 15px;
+  font-style: italic;
+  font-synthesis-style: none;
+}
+
+.finding.is-active .finding-reason {
+  color: inherit;
+}
+
+.accepted {
+  margin-top: 28px;
+}
+
+.accepted-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 var(--gutter);
+}
+
+.accepted-head h3 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.accepted-head .sidebar-count {
+  font-size: 22px;
+}
+
+.accepted-note {
+  margin: 8px 0 4px;
+  padding: 0 var(--gutter);
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .stage {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -255,6 +306,35 @@
   font-family: var(--font-mono);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.accepted-reason {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--plate);
+  font-size: 15px;
+}
+
+.accepted-reason span,
+.finding-id span {
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.finding-id {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.finding-id code {
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  user-select: all;
 }
 
 .fix {
