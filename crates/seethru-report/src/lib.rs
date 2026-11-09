@@ -4,7 +4,7 @@ mod assets {
 
 use std::fmt;
 
-use seethru_core::ScanReport;
+use seethru_core::{Lang, ScanReport};
 
 pub const DATA_ELEMENT_ID: &str = "seethru-report";
 
@@ -31,7 +31,7 @@ pub fn html_available() -> bool {
     assets::BUNDLED
 }
 
-pub fn render_html(report: &ScanReport) -> Result<String, ReportError> {
+pub fn render_html(report: &ScanReport, lang: Lang) -> Result<String, ReportError> {
     if !assets::BUNDLED {
         return Err(ReportError::WebUiMissing);
     }
@@ -41,7 +41,10 @@ pub fn render_html(report: &ScanReport) -> Result<String, ReportError> {
     let title = escape_html(&report.target.name);
     let mut html =
         String::with_capacity(assets::APP_JS.len() + assets::APP_CSS.len() + data.len() + 1024);
-    html.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
+    html.push_str(&format!(
+        "<!doctype html>\n<html lang=\"{}\">\n<head>\n<meta charset=\"utf-8\">\n",
+        lang.code()
+    ));
     html.push_str(&format!(
         "<meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n"
     ));

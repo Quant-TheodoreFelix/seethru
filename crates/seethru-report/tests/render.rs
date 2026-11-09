@@ -1,5 +1,5 @@
 use seethru_core::{
-    MaskedSecret, Node, NodeId, NodeKind, SCHEMA_VERSION, ScanReport, SecretKind, Summary,
+    Lang, MaskedSecret, Node, NodeId, NodeKind, SCHEMA_VERSION, ScanReport, SecretKind, Summary,
     TargetInfo, ToolInfo,
 };
 
@@ -37,7 +37,7 @@ fn report() -> ScanReport {
 
 #[test]
 fn rendered_report_is_self_contained_and_never_contains_raw_secrets() {
-    let rendered = seethru_report::render_html(&report());
+    let rendered = seethru_report::render_html(&report(), Lang::En);
     if !seethru_report::html_available() {
         assert!(matches!(
             rendered,
@@ -60,4 +60,16 @@ fn rendered_report_is_self_contained_and_never_contains_raw_secrets() {
             "<title>seethru - &lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>"
         )
     );
+}
+
+#[test]
+fn rendered_report_starts_in_the_chosen_language() {
+    if !seethru_report::html_available() {
+        return;
+    }
+    for lang in Lang::ALL {
+        let html = seethru_report::render_html(&report(), lang).unwrap_or_default();
+        let opening = format!("<html lang=\"{}\">", lang.code());
+        assert!(html.contains(&opening), "{opening}");
+    }
 }

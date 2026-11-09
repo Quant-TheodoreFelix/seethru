@@ -4,13 +4,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use seethru_core::{ScanReport, Severity};
+use seethru_core::{Lang, ScanReport, Severity};
 
 const USAGE: &str = "\
 seethru - see through your app before attackers do
 
 Usage
-  seethru scan [PATH] [--out FILE] [--json]
+  seethru scan [PATH] [--out FILE] [--json] [--lang LANG]
   seethru schema
   seethru --version
 
@@ -21,6 +21,7 @@ Commands
 Options
   --out FILE   Where to write the HTML report (default is PATH/.seethru/report.html)
   --json       Print the scan report as JSON to stdout instead of writing HTML
+  --lang LANG  Language of the summary and the report, en or ko (default is en)
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -31,6 +32,7 @@ enum Command {
         path: PathBuf,
         out: Option<PathBuf>,
         json: bool,
+        lang: Lang,
     },
     Schema,
     Version,
@@ -55,9 +57,18 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut path = None;
             let mut out = None;
             let mut json = false;
+            let mut lang = Lang::default();
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
+                    Long("lang") => {
+                        let code = parser.value()?.string()?;
+                        lang = Lang::from_code(&code).ok_or_else(|| {
+                            lexopt::Error::Custom(
+                                format!("unknown language '{code}', use en or ko").into(),
+                            )
+                        })?;
+                    }
                     Long("out") => out = Some(PathBuf::from(parser.value()?)),
                     Short('h') | Long("help") => return Ok(Command::Help),
                     Value(value) if path.is_none() => path = Some(PathBuf::from(value)),
@@ -73,6 +84,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
                 out,
                 json,
+                lang,
             })
         }
         "schema" => match parser.next()? {
@@ -123,21 +135,29 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             serde_json::to_writer_pretty(&mut stdout, &seethru_core::report_schema())?;
             writeln!(stdout)?;
         }
-        Command::Scan { path, out, json } => {
+        Command::Scan {
+            path,
+            out,
+            json,
+            lang,
+        } => {
             let mut report = seethru_analyzer::scan(&path)?;
             seethru_fix::attach_fix_prompts(&mut report);
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
                 writeln!(stdout)?;
             } else {
-                print_summary(&mut stdout, &report)?;
-                let html = seethru_report::render_html(&report)?;
+                print_summary(&mut stdout, &report, lang)?;
+                let html = seethru_report::render_html(&report, lang)?;
                 let target = match out {
                     Some(out) => out,
                     None => default_report_path(&path)?,
                 };
                 write_report(&target, &html)?;
-                writeln!(stdout, "\nReport written to {}", target.display())?;
+                match lang {
+                    Lang::En => writeln!(stdout, "\nReport written to {}", target.display())?,
+                    Lang::Ko => writeln!(stdout, "\n리포트를 {}에 저장했어요", target.display())?,
+                }
             }
         }
     }
@@ -190,41 +210,66 @@ fn write_report(path: &Path, html: &str) -> io::Result<()> {
     file.sync_all()
 }
 
-fn severity_label(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Critical => "CRITICAL",
-        Severity::High => "HIGH",
-        Severity::Medium => "MEDIUM",
-        Severity::Low => "LOW",
-        Severity::Info => "INFO",
+fn severity_label(severity: Severity, lang: Lang) -> &'static str {
+    match (lang, severity) {
+        (Lang::En, Severity::Critical) => "critical",
+        (Lang::En, Severity::High) => "high",
+        (Lang::En, Severity::Medium) => "medium",
+        (Lang::En, Severity::Low) => "low",
+        (Lang::En, Severity::Info) => "info",
+        (Lang::Ko, Severity::Critical) => "치명적",
+        (Lang::Ko, Severity::High) => "높음",
+        (Lang::Ko, Severity::Medium) => "중간",
+        (Lang::Ko, Severity::Low) => "낮음",
+        (Lang::Ko, Severity::Info) => "정보",
     }
 }
 
-fn print_summary(out: &mut impl Write, report: &ScanReport) -> io::Result<()> {
-    let s = &report.summary;
-    let files = if report.target.files_scanned == 1 {
-        "file"
-    } else {
-        "files"
-    };
-    writeln!(
-        out,
-        "seethru scan {} ({} {files}, {} skipped)",
-        report.target.name, report.target.files_scanned, report.target.files_skipped
-    )?;
-    if report.target.truncated {
-        writeln!(
+fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::Result<()> {
+    let target = &report.target;
+    match lang {
+        Lang::En => {
+            let files = if target.files_scanned == 1 {
+                "file"
+            } else {
+                "files"
+            };
+            writeln!(
+                out,
+                "seethru scan {} ({} {files}, {} skipped)",
+                target.name, target.files_scanned, target.files_skipped
+            )?;
+        }
+        Lang::Ko => writeln!(
             out,
-            "warning: scan stopped early because the project is too large"
-        )?;
+            "seethru scan {} (파일 {}개, 건너뜀 {}개)",
+            target.name, target.files_scanned, target.files_skipped
+        )?,
     }
-    writeln!(
-        out,
-        "critical {}  high {}  medium {}  low {}  info {}\n",
-        s.critical, s.high, s.medium, s.low, s.info
-    )?;
+    if target.truncated {
+        let warning = match lang {
+            Lang::En => "warning: scan stopped early because the project is too large",
+            Lang::Ko => "경고: 프로젝트가 너무 커서 검사를 일찍 멈췄어요",
+        };
+        writeln!(out, "{warning}")?;
+    }
+    let s = &report.summary;
+    let counts = [
+        (Severity::Critical, s.critical),
+        (Severity::High, s.high),
+        (Severity::Medium, s.medium),
+        (Severity::Low, s.low),
+        (Severity::Info, s.info),
+    ]
+    .map(|(severity, count)| format!("{} {count}", severity_label(severity, lang)))
+    .join("  ");
+    writeln!(out, "{counts}\n")?;
     if report.findings.is_empty() {
-        writeln!(out, "No problems found")?;
+        let none = match lang {
+            Lang::En => "No problems found",
+            Lang::Ko => "발견한 문제가 없어요",
+        };
+        writeln!(out, "{none}")?;
     }
     for finding in &report.findings {
         let place = finding
@@ -232,12 +277,12 @@ fn print_summary(out: &mut impl Write, report: &ScanReport) -> io::Result<()> {
             .as_ref()
             .map(|l| format!("{}:{}:{}", l.path, l.line, l.column))
             .unwrap_or_default();
-        writeln!(
-            out,
-            "[{}] {}",
-            severity_label(finding.severity),
-            finding.title.en
-        )?;
+        let label = severity_label(finding.severity, lang);
+        let label = match lang {
+            Lang::En => label.to_uppercase(),
+            Lang::Ko => label.to_owned(),
+        };
+        writeln!(out, "[{label}] {}", finding.title.get(lang))?;
         writeln!(out, "  {place}")?;
     }
     Ok(())
@@ -245,7 +290,11 @@ fn print_summary(out: &mut impl Write, report: &ScanReport) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, parse};
+    use super::{Command, parse, print_summary};
+    use seethru_core::{
+        Finding, Lang, LocalizedText, NodeId, RuleId, SCHEMA_VERSION, ScanReport, Severity,
+        Summary, TargetInfo, ToolInfo,
+    };
     use std::ffi::OsString;
 
     fn args(list: &[&str]) -> Vec<OsString> {
@@ -256,7 +305,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false }) if path.as_os_str() == "."
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En }) if path.as_os_str() == "."
         ));
     }
 
@@ -264,7 +313,7 @@ mod tests {
     fn scan_accepts_path_and_json_flag_in_any_order() {
         assert!(matches!(
             parse(args(&["scan", "--json", "app"])),
-            Ok(Command::Scan { ref path, out: None, json: true }) if path.as_os_str() == "app"
+            Ok(Command::Scan { ref path, out: None, json: true, .. }) if path.as_os_str() == "app"
         ));
     }
 
@@ -276,6 +325,73 @@ mod tests {
         ));
         assert!(parse(args(&["scan", "--out"])).is_err());
         assert!(parse(args(&["scan", "--json", "--out", "r.html"])).is_err());
+    }
+
+    #[test]
+    fn scan_accepts_a_language() {
+        assert!(matches!(
+            parse(args(&["scan", "--lang", "ko", "app"])),
+            Ok(Command::Scan { lang: Lang::Ko, .. })
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "--lang=en"])),
+            Ok(Command::Scan { lang: Lang::En, .. })
+        ));
+        assert!(parse(args(&["scan", "--lang"])).is_err());
+        assert!(parse(args(&["scan", "--lang", "jp"])).is_err());
+        assert!(parse(args(&["scan", "--lang", "KO"])).is_err());
+    }
+
+    fn one_finding_report() -> ScanReport {
+        let findings = vec![Finding {
+            id: "f".to_owned(),
+            rule: RuleId::SupabaseRlsDisabled,
+            severity: Severity::Critical,
+            title: LocalizedText {
+                en: "RLS is off".to_owned(),
+                ko: "RLS가 꺼져 있어요".to_owned(),
+            },
+            explanation: LocalizedText::default(),
+            node: NodeId::new("table:public.todos"),
+            location: None,
+            fix_prompt: None,
+        }];
+        ScanReport {
+            schema_version: SCHEMA_VERSION,
+            tool: ToolInfo {
+                name: "seethru".to_owned(),
+                version: "0".to_owned(),
+            },
+            target: TargetInfo {
+                name: "app".to_owned(),
+                files_scanned: 1,
+                files_skipped: 0,
+                truncated: false,
+            },
+            summary: Summary::from_findings(&findings),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            findings,
+        }
+    }
+
+    fn summary(lang: Lang) -> String {
+        let mut out = Vec::new();
+        let printed = print_summary(&mut out, &one_finding_report(), lang);
+        assert!(printed.is_ok(), "{printed:?}");
+        String::from_utf8(out).unwrap_or_default()
+    }
+
+    #[test]
+    fn summary_follows_the_chosen_language() {
+        let en = summary(Lang::En);
+        assert!(en.contains("(1 file, 0 skipped)"), "{en}");
+        assert!(en.contains("critical 1  high 0"), "{en}");
+        assert!(en.contains("[CRITICAL] RLS is off"), "{en}");
+        let ko = summary(Lang::Ko);
+        assert!(ko.contains("(파일 1개, 건너뜀 0개)"), "{ko}");
+        assert!(ko.contains("치명적 1  높음 0"), "{ko}");
+        assert!(ko.contains("[치명적] RLS가 꺼져 있어요"), "{ko}");
     }
 
     #[test]
