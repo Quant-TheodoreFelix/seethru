@@ -117,6 +117,7 @@ fn secret_report(label: &str) -> (ScanReport, String) {
             column: 7,
         }),
         fix_prompt: None,
+        accepted: None,
     };
     let report = ScanReport {
         schema_version: SCHEMA_VERSION,
@@ -128,7 +129,9 @@ fn secret_report(label: &str) -> (ScanReport, String) {
             name: "t".to_owned(),
             files_scanned: 1,
             files_skipped: 0,
+            files_excluded: 0,
             truncated: false,
+            config_file: None,
         },
         summary: Summary::default(),
         nodes: vec![node],

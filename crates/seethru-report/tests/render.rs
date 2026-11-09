@@ -18,7 +18,9 @@ fn report() -> ScanReport {
             name: "</title><script>alert(1)</script>".to_owned(),
             files_scanned: 1,
             files_skipped: 0,
+            files_excluded: 0,
             truncated: false,
+            config_file: None,
         },
         summary: Summary::default(),
         nodes: vec![Node {

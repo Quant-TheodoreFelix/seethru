@@ -28,6 +28,7 @@ oxc_ast_visit = "=0.155.0"
 oxc_parser = "=0.155.0"
 oxc_span = "=0.155.0"
 sha2 = "=0.11.1"
+toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -85,6 +85,7 @@ impl Graph {
             node,
             location,
             fix_prompt: None,
+            accepted: None,
         });
     }
 

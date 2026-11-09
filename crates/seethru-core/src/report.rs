@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -32,7 +32,10 @@ pub struct TargetInfo {
     pub name: String,
     pub files_scanned: u32,
     pub files_skipped: u32,
+    pub files_excluded: u32,
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -43,12 +46,17 @@ pub struct Summary {
     pub medium: u32,
     pub low: u32,
     pub info: u32,
+    pub accepted: u32,
 }
 
 impl Summary {
     pub fn from_findings(findings: &[Finding]) -> Self {
         let mut summary = Self::default();
         for finding in findings {
+            if finding.accepted.is_some() {
+                summary.accepted = summary.accepted.saturating_add(1);
+                continue;
+            }
             let slot = match finding.severity {
                 Severity::Critical => &mut summary.critical,
                 Severity::High => &mut summary.high,
@@ -271,4 +279,12 @@ pub struct Finding {
     pub location: Option<Location>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fix_prompt: Option<LocalizedText>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<Acceptance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Acceptance {
+    pub reason: String,
 }

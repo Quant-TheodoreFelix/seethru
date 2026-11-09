@@ -66,6 +66,10 @@ export interface LocalizedText {
   ko: string;
 }
 
+export interface Acceptance {
+  reason: string;
+}
+
 export interface Finding {
   id: string;
   rule: string;
@@ -75,15 +79,23 @@ export interface Finding {
   node: string;
   location?: Location;
   fixPrompt?: LocalizedText;
+  accepted?: Acceptance;
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
   tool: { name: string; version: string };
-  target: { name: string; filesScanned: number; filesSkipped: number; truncated: boolean };
-  summary: Record<Severity, number>;
+  target: {
+    name: string;
+    filesScanned: number;
+    filesSkipped: number;
+    filesExcluded: number;
+    truncated: boolean;
+    configFile?: string;
+  };
+  summary: Record<Severity, number> & { accepted: number };
   nodes: ReportNode[];
   edges: ReportEdge[];
   findings: Finding[];
@@ -196,8 +208,15 @@ export function parseScanReport(input: unknown): ScanReport {
   if (root.schemaVersion !== SCHEMA_VERSION) fail("report.schemaVersion", `version ${SCHEMA_VERSION} expected`);
 
   const tool = object(root.tool, "report.tool", ["name", "version"]);
-  const target = object(root.target, "report.target", ["name", "filesScanned", "filesSkipped", "truncated"]);
-  const summary = object(root.summary, "report.summary", SEVERITIES);
+  const target = object(root.target, "report.target", [
+    "name",
+    "filesScanned",
+    "filesSkipped",
+    "filesExcluded",
+    "truncated",
+    "configFile",
+  ]);
+  const summary = object(root.summary, "report.summary", [...SEVERITIES, "accepted"]);
 
   const nodes = list(root.nodes, "report.nodes", MAX_NODES).map((value, i): ReportNode => {
     const path = `report.nodes[${i}]`;
@@ -222,7 +241,7 @@ export function parseScanReport(input: unknown): ScanReport {
 
   const findings = list(root.findings, "report.findings", MAX_FINDINGS).map((value, i): Finding => {
     const path = `report.findings[${i}]`;
-    const o = object(value, path, ["id", "rule", "severity", "title", "explanation", "node", "location", "fixPrompt"]);
+    const o = object(value, path, ["id", "rule", "severity", "title", "explanation", "node", "location", "fixPrompt", "accepted"]);
     const finding: Finding = {
       id: text(o.id, `${path}.id`),
       rule: text(o.rule, `${path}.rule`),
@@ -233,6 +252,10 @@ export function parseScanReport(input: unknown): ScanReport {
     };
     if (o.location !== undefined) finding.location = location(o.location, `${path}.location`);
     if (o.fixPrompt !== undefined) finding.fixPrompt = localized(o.fixPrompt, `${path}.fixPrompt`);
+    if (o.accepted !== undefined) {
+      const accepted = object(o.accepted, `${path}.accepted`, ["reason"]);
+      finding.accepted = { reason: text(accepted.reason, `${path}.accepted.reason`) };
+    }
     return finding;
   });
 
@@ -243,7 +266,9 @@ export function parseScanReport(input: unknown): ScanReport {
       name: text(target.name, "report.target.name"),
       filesScanned: count(target.filesScanned, "report.target.filesScanned"),
       filesSkipped: count(target.filesSkipped, "report.target.filesSkipped"),
+      filesExcluded: count(target.filesExcluded, "report.target.filesExcluded"),
       truncated: flag(target.truncated, "report.target.truncated"),
+      ...(target.configFile === undefined ? {} : { configFile: text(target.configFile, "report.target.configFile") }),
     },
     summary: {
       critical: count(summary.critical, "report.summary.critical"),
@@ -251,6 +276,7 @@ export function parseScanReport(input: unknown): ScanReport {
       medium: count(summary.medium, "report.summary.medium"),
       low: count(summary.low, "report.summary.low"),
       info: count(summary.info, "report.summary.info"),
+      accepted: count(summary.accepted, "report.summary.accepted"),
     },
     nodes,
     edges,

@@ -14,7 +14,9 @@ fn run(files: &[(&str, &str)]) -> seethru_core::ScanReport {
         name: "test".to_owned(),
         files_scanned: 0,
         files_skipped: 0,
+        files_excluded: 0,
         truncated: false,
+        config_file: None,
     })
 }
 

@@ -28,13 +28,19 @@ pub(crate) struct Entry {
 pub(crate) struct Walk {
     pub entries: Vec<Entry>,
     pub skipped: u32,
+    pub excluded: u32,
     pub truncated: bool,
 }
 
-pub(crate) fn walk(root: &Path, wanted: impl Fn(&str) -> bool) -> Result<Walk, ScanError> {
+pub(crate) fn walk(
+    root: &Path,
+    wanted: impl Fn(&str) -> bool,
+    excluded: impl Fn(&str) -> bool,
+) -> Result<Walk, ScanError> {
     let mut out = Walk {
         entries: Vec::new(),
         skipped: 0,
+        excluded: 0,
         truncated: false,
     };
     let mut stack: Vec<(PathBuf, String, usize)> = vec![(root.to_path_buf(), String::new(), 0)];
@@ -85,6 +91,10 @@ pub(crate) fn walk(root: &Path, wanted: impl Fn(&str) -> bool) -> Result<Walk, S
                 }
                 stack.push((path, rel_path, depth + 1));
             } else if file_type.is_file() && wanted(&rel_path) {
+                if excluded(&rel_path) {
+                    out.excluded = out.excluded.saturating_add(1);
+                    continue;
+                }
                 if meta.len() > MAX_FILE_BYTES {
                     out.skipped = out.skipped.saturating_add(1);
                     continue;

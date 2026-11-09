@@ -1,5 +1,7 @@
 mod classify;
+mod config;
 mod env;
+mod glob;
 mod graph;
 mod resolve;
 mod roles;
@@ -18,10 +20,13 @@ use seethru_core::{
 };
 
 use classify::{Class, Content, ProjectHints};
+use config::Config;
 use graph::Graph;
 use resolve::{ConfigText, Resolver};
 use roles::Module;
 use supabase::Migrations;
+
+pub use config::CONFIG_FILE;
 
 const MAX_RESOLVER_CONFIG_BYTES: usize = 256 * 1024;
 
@@ -29,6 +34,7 @@ const MAX_RESOLVER_CONFIG_BYTES: usize = 256 * 1024;
 pub enum ScanError {
     NotADirectory,
     Io(std::io::Error),
+    Config(String),
 }
 
 impl fmt::Display for ScanError {
@@ -36,18 +42,43 @@ impl fmt::Display for ScanError {
         match self {
             Self::NotADirectory => f.write_str("scan target is not a directory"),
             Self::Io(error) => write!(f, "cannot read scan target: {error}"),
+            Self::Config(message) => write!(f, "cannot use {CONFIG_FILE}: {message}"),
         }
     }
 }
 
 impl std::error::Error for ScanError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScanOptions {
+    pub read_config: bool,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self { read_config: true }
+    }
+}
+
 pub fn scan(root: &Path) -> Result<ScanReport, ScanError> {
+    scan_with(root, ScanOptions::default())
+}
+
+pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanError> {
     let root = std::fs::canonicalize(root).map_err(ScanError::Io)?;
     if !root.is_dir() {
         return Err(ScanError::NotADirectory);
     }
-    let walked = walk::walk(&root, classify::is_wanted)?;
+    let config = if options.read_config {
+        Config::load(&root)?
+    } else {
+        None
+    };
+    let walked = walk::walk(&root, classify::is_wanted, |rel_path| {
+        config
+            .as_ref()
+            .is_some_and(|config| config.is_excluded(rel_path))
+    })?;
     let hints =
         ProjectHints::from_paths(walked.entries.iter().map(|entry| entry.rel_path.as_str()));
 
@@ -117,12 +148,21 @@ pub fn scan(root: &Path) -> Result<ScanReport, ScanError> {
         .and_then(|name| name.to_str())
         .unwrap_or("project")
         .to_owned();
-    Ok(graph.finish(TargetInfo {
+    let mut report = graph.finish(TargetInfo {
         name,
         files_scanned: scanned,
         files_skipped: skipped,
+        files_excluded: walked.excluded,
         truncated: walked.truncated,
-    }))
+        config_file: config.as_ref().map(|_| CONFIG_FILE.to_owned()),
+    });
+    if let Some(config) = &config {
+        for finding in &mut report.findings {
+            finding.accepted = config.acceptance(finding);
+        }
+        report.summary = seethru_core::Summary::from_findings(&report.findings);
+    }
+    Ok(report)
 }
 
 pub(crate) fn position(text: &str, offset: usize) -> (u32, u32) {

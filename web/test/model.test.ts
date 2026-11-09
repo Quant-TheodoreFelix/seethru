@@ -4,10 +4,10 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     tool: { name: "seethru", version: "0.1.0" },
-    target: { name: "app", filesScanned: 2, filesSkipped: 0, truncated: false },
-    summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+    target: { name: "app", filesScanned: 2, filesSkipped: 0, filesExcluded: 0, truncated: false },
+    summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0, accepted: 0 },
     nodes: [
       { id: "file:a.sql", label: "a.sql", kind: { type: "file", role: "migration" } },
       {
@@ -61,6 +61,21 @@ test("reads finding texts in both languages and rejects anything else", () => {
   assert.throws(() => parseScanReport(plainPrompt), /fixPrompt/);
 });
 
+test("reads accepted findings and the config that accepted them", () => {
+  const input = validReport();
+  input.target = { ...(input.target as object), filesExcluded: 4, configFile: "seethru.toml" };
+  const finding = (input.findings as Record<string, unknown>[])[0];
+  input.findings = [{ ...finding, accepted: { reason: "Public on purpose" } }];
+  const report = parseScanReport(input);
+  assert.equal(report.target.configFile, "seethru.toml");
+  assert.equal(report.target.filesExcluded, 4);
+  assert.deepEqual(report.findings[0]?.accepted, { reason: "Public on purpose" });
+
+  const broken = validReport();
+  broken.findings = [{ ...finding, accepted: { reason: "x", by: "someone" } }];
+  assert.throws(() => parseScanReport(broken), /accepted\.by/);
+});
+
 test("rejects edges and findings that point at missing nodes", () => {
   const dangling = validReport();
   dangling.edges = [{ from: "file:a.sql", to: "table:public.ghost", kind: "defines" }];
@@ -73,7 +88,7 @@ test("rejects edges and findings that point at missing nodes", () => {
 
 test("rejects unknown enum values and node types", () => {
   const badSeverity = validReport();
-  badSeverity.summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0, extreme: 1 };
+  badSeverity.summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0, accepted: 0, extreme: 1 };
   assert.throws(() => parseScanReport(badSeverity), ReportError);
 
   const badKind = validReport();
@@ -82,8 +97,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 1 }), /version 2 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 3 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 2 }), /version 3 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 4 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -94,7 +109,7 @@ test("rejects duplicate node ids and negative counts", () => {
   assert.throws(() => parseScanReport(duplicate), /unique/);
 
   const negative = validReport();
-  negative.target = { name: "app", filesScanned: -1, filesSkipped: 0, truncated: false };
+  negative.target = { name: "app", filesScanned: -1, filesSkipped: 0, filesExcluded: 0, truncated: false };
   assert.throws(() => parseScanReport(negative), ReportError);
 });
 

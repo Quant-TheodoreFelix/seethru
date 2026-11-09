@@ -10,7 +10,7 @@ const USAGE: &str = "\
 seethru - see through your app before attackers do
 
 Usage
-  seethru scan [PATH] [--out FILE] [--json] [--lang LANG]
+  seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
   seethru schema
   seethru --version
 
@@ -22,6 +22,7 @@ Options
   --out FILE   Where to write the HTML report (default is PATH/.seethru/report.html)
   --json       Print the scan report as JSON to stdout instead of writing HTML
   --lang LANG  Language of the summary and the report, en or ko (default is en)
+  --no-config  Ignore seethru.toml in the scanned project
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -33,6 +34,7 @@ enum Command {
         out: Option<PathBuf>,
         json: bool,
         lang: Lang,
+        read_config: bool,
     },
     Schema,
     Version,
@@ -58,9 +60,11 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut out = None;
             let mut json = false;
             let mut lang = Lang::default();
+            let mut read_config = true;
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
+                    Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
                         lang = Lang::from_code(&code).ok_or_else(|| {
@@ -85,6 +89,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 out,
                 json,
                 lang,
+                read_config,
             })
         }
         "schema" => match parser.next()? {
@@ -140,8 +145,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             out,
             json,
             lang,
+            read_config,
         } => {
-            let mut report = seethru_analyzer::scan(&path)?;
+            let options = seethru_analyzer::ScanOptions { read_config };
+            let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
@@ -227,6 +234,7 @@ fn severity_label(severity: Severity, lang: Lang) -> &'static str {
 
 fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::Result<()> {
     let target = &report.target;
+    let excluded = target.files_excluded;
     match lang {
         Lang::En => {
             let files = if target.files_scanned == 1 {
@@ -234,17 +242,35 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
             } else {
                 "files"
             };
+            let excluded = if excluded > 0 {
+                format!(", {excluded} excluded")
+            } else {
+                String::new()
+            };
             writeln!(
                 out,
-                "seethru scan {} ({} {files}, {} skipped)",
+                "seethru scan {} ({} {files}, {} skipped{excluded})",
                 target.name, target.files_scanned, target.files_skipped
             )?;
         }
-        Lang::Ko => writeln!(
-            out,
-            "seethru scan {} (파일 {}개, 건너뜀 {}개)",
-            target.name, target.files_scanned, target.files_skipped
-        )?,
+        Lang::Ko => {
+            let excluded = if excluded > 0 {
+                format!(", 제외 {excluded}개")
+            } else {
+                String::new()
+            };
+            writeln!(
+                out,
+                "seethru scan {} (파일 {}개, 건너뜀 {}개{excluded})",
+                target.name, target.files_scanned, target.files_skipped
+            )?;
+        }
+    }
+    if let Some(config) = &target.config_file {
+        match lang {
+            Lang::En => writeln!(out, "settings from {config}")?,
+            Lang::Ko => writeln!(out, "{config} 설정을 적용했어요")?,
+        }
     }
     if target.truncated {
         let warning = match lang {
@@ -263,37 +289,66 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
     ]
     .map(|(severity, count)| format!("{} {count}", severity_label(severity, lang)))
     .join("  ");
-    writeln!(out, "{counts}\n")?;
-    if report.findings.is_empty() {
+    let accepted = if s.accepted > 0 {
+        match lang {
+            Lang::En => format!("  accepted {}", s.accepted),
+            Lang::Ko => format!("  허용함 {}", s.accepted),
+        }
+    } else {
+        String::new()
+    };
+    writeln!(out, "{counts}{accepted}\n")?;
+    let (open, accepted): (Vec<_>, Vec<_>) = report
+        .findings
+        .iter()
+        .partition(|finding| finding.accepted.is_none());
+    if open.is_empty() {
         let none = match lang {
             Lang::En => "No problems found",
             Lang::Ko => "발견한 문제가 없어요",
         };
         writeln!(out, "{none}")?;
     }
-    for finding in &report.findings {
-        let place = finding
-            .location
-            .as_ref()
-            .map(|l| format!("{}:{}:{}", l.path, l.line, l.column))
-            .unwrap_or_default();
+    for finding in open {
         let label = severity_label(finding.severity, lang);
         let label = match lang {
             Lang::En => label.to_uppercase(),
             Lang::Ko => label.to_owned(),
         };
         writeln!(out, "[{label}] {}", finding.title.get(lang))?;
-        writeln!(out, "  {place}")?;
+        writeln!(out, "  {}", place(finding))?;
+    }
+    if !accepted.is_empty() {
+        let (heading, label, reason) = match lang {
+            Lang::En => ("Accepted in seethru.toml", "ACCEPTED", "reason"),
+            Lang::Ko => ("seethru.toml에서 허용한 문제", "허용함", "사유"),
+        };
+        writeln!(out, "\n{heading}")?;
+        for finding in accepted {
+            writeln!(out, "[{label}] {}", finding.title.get(lang))?;
+            writeln!(out, "  {}", place(finding))?;
+            if let Some(acceptance) = &finding.accepted {
+                writeln!(out, "  {reason}: {}", acceptance.reason)?;
+            }
+        }
     }
     Ok(())
+}
+
+fn place(finding: &seethru_core::Finding) -> String {
+    finding
+        .location
+        .as_ref()
+        .map(|l| format!("{}:{}:{}", l.path, l.line, l.column))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Command, parse, print_summary};
     use seethru_core::{
-        Finding, Lang, LocalizedText, NodeId, RuleId, SCHEMA_VERSION, ScanReport, Severity,
-        Summary, TargetInfo, ToolInfo,
+        Acceptance, Finding, Lang, LocalizedText, NodeId, RuleId, SCHEMA_VERSION, ScanReport,
+        Severity, Summary, TargetInfo, ToolInfo,
     };
     use std::ffi::OsString;
 
@@ -305,7 +360,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En }) if path.as_os_str() == "."
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true }) if path.as_os_str() == "."
         ));
     }
 
@@ -342,6 +397,24 @@ mod tests {
         assert!(parse(args(&["scan", "--lang", "KO"])).is_err());
     }
 
+    #[test]
+    fn scan_can_ignore_the_project_config() {
+        assert!(matches!(
+            parse(args(&["scan", "app"])),
+            Ok(Command::Scan {
+                read_config: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "--no-config", "app"])),
+            Ok(Command::Scan {
+                read_config: false,
+                ..
+            })
+        ));
+    }
+
     fn one_finding_report() -> ScanReport {
         let findings = vec![Finding {
             id: "f".to_owned(),
@@ -355,6 +428,7 @@ mod tests {
             node: NodeId::new("table:public.todos"),
             location: None,
             fix_prompt: None,
+            accepted: None,
         }];
         ScanReport {
             schema_version: SCHEMA_VERSION,
@@ -366,7 +440,9 @@ mod tests {
                 name: "app".to_owned(),
                 files_scanned: 1,
                 files_skipped: 0,
+                files_excluded: 0,
                 truncated: false,
+                config_file: None,
             },
             summary: Summary::from_findings(&findings),
             nodes: Vec::new(),
@@ -392,6 +468,31 @@ mod tests {
         assert!(ko.contains("(파일 1개, 건너뜀 0개)"), "{ko}");
         assert!(ko.contains("치명적 1  높음 0"), "{ko}");
         assert!(ko.contains("[치명적] RLS가 꺼져 있어요"), "{ko}");
+    }
+
+    #[test]
+    fn summary_lists_accepted_findings_apart_with_their_reason() {
+        let mut report = one_finding_report();
+        report.target.files_excluded = 3;
+        report.target.config_file = Some("seethru.toml".to_owned());
+        if let Some(finding) = report.findings.first_mut() {
+            finding.accepted = Some(Acceptance {
+                reason: "Demo table on purpose".to_owned(),
+            });
+        }
+        report.summary = Summary::from_findings(&report.findings);
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::En).is_ok());
+        let en = String::from_utf8(out).unwrap_or_default();
+        assert!(en.contains("(1 file, 0 skipped, 3 excluded)"), "{en}");
+        assert!(en.contains("settings from seethru.toml"), "{en}");
+        assert!(
+            en.contains("critical 0  high 0  medium 0  low 0  info 0  accepted 1"),
+            "{en}"
+        );
+        assert!(en.contains("No problems found"), "{en}");
+        assert!(en.contains("[ACCEPTED] RLS is off"), "{en}");
+        assert!(en.contains("reason: Demo table on purpose"), "{en}");
     }
 
     #[test]

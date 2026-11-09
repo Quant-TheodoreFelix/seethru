@@ -1,5 +1,17 @@
 {
   "$defs": {
+    "Acceptance": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
     "Edge": {
       "additionalProperties": false,
       "properties": {
@@ -47,6 +59,16 @@
     "Finding": {
       "additionalProperties": false,
       "properties": {
+        "accepted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Acceptance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "explanation": {
           "$ref": "#/$defs/LocalizedText"
         },
@@ -325,6 +347,11 @@
     "Summary": {
       "additionalProperties": false,
       "properties": {
+        "accepted": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "critical": {
           "format": "uint32",
           "minimum": 0,
@@ -356,13 +383,25 @@
         "high",
         "medium",
         "low",
-        "info"
+        "info",
+        "accepted"
       ],
       "type": "object"
     },
     "TargetInfo": {
       "additionalProperties": false,
       "properties": {
+        "configFile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filesExcluded": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "filesScanned": {
           "format": "uint32",
           "minimum": 0,
@@ -384,6 +423,7 @@
         "name",
         "filesScanned",
         "filesSkipped",
+        "filesExcluded",
         "truncated"
       ],
       "type": "object"
