@@ -69,6 +69,10 @@ test("labels graph nodes in the chosen language", () => {
   assert.equal(component("unknown", "migration"), "Migration");
   assert.equal(component("unknown", "config"), "Env file");
   assert.equal(component("browser", "buildOutput"), "Build output");
+  assert.equal(
+    kindLabel({ type: "component", runtime: "server", artifact: "buildOutput", unit: "file", basis: "path" }, MESSAGES.ko),
+    "서버 빌드 결과물",
+  );
   assert.equal(component("unknown", "other"), "File");
   const env = { type: "config", detail: { type: "envVar", exposedToClient: true } } as const;
   assert.equal(kindLabel(env, MESSAGES.en), "Env variable · public in browser");

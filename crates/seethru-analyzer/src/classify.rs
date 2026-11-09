@@ -51,6 +51,7 @@ const BUILD_DIRS_ANYWHERE: &[&str] = &[
     ".nuxt",
 ];
 const BUILD_DIRS_AT_ROOT: &[&str] = &["build", "out"];
+const NEXT_DIST_DIR: &str = ".next";
 
 const VITE_CONFIGS: &[&str] = &[
     "vite.config.ts",
@@ -85,6 +86,8 @@ pub(crate) enum FileRole {
     Migration,
     EnvFile,
     BuildOutput,
+    ServerBuildOutput,
+    BuildCache,
     Other,
 }
 
@@ -93,10 +96,18 @@ impl FileRole {
         matches!(self, Self::BrowserCode | Self::BuildOutput)
     }
 
+    pub(crate) fn is_build_output(self) -> bool {
+        matches!(
+            self,
+            Self::BuildOutput | Self::ServerBuildOutput | Self::BuildCache
+        )
+    }
+
     pub(crate) fn runtime(self) -> Runtime {
         match self {
             Self::BrowserCode | Self::BuildOutput => Runtime::Browser,
-            Self::ServerCode => Runtime::Server,
+            Self::ServerCode | Self::ServerBuildOutput => Runtime::Server,
+            Self::BuildCache => Runtime::Build,
             Self::EdgeFunction => Runtime::Edge,
             Self::Migration => Runtime::Database,
             Self::UnknownCode | Self::EnvFile | Self::Other => Runtime::Unknown,
@@ -110,7 +121,7 @@ impl FileRole {
             }
             Self::Migration => Artifact::Migration,
             Self::EnvFile => Artifact::Config,
-            Self::BuildOutput => Artifact::BuildOutput,
+            Self::BuildOutput | Self::ServerBuildOutput | Self::BuildCache => Artifact::BuildOutput,
             Self::Other => Artifact::Other,
         }
     }
@@ -136,7 +147,7 @@ pub(crate) fn is_wanted(rel_path: &str) -> bool {
 impl ProjectHints {
     pub(crate) fn from_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Self {
         let mut hints = Self::default();
-        for path in paths {
+        for path in paths.filter(|path| !is_build_output(path)) {
             let (dir, name) = split_dir(path);
             if VITE_CONFIGS.contains(&name) {
                 hints.vite_roots.insert(dir.to_owned());
@@ -153,7 +164,9 @@ impl ProjectHints {
         let role = match content {
             Content::Sql => FileRole::Migration,
             Content::Env => FileRole::EnvFile,
-            Content::Script | Content::Text if is_build_output(rel_path) => FileRole::BuildOutput,
+            Content::Script | Content::Text if is_build_output(rel_path) => {
+                build_output_role(rel_path)
+            }
             Content::Script | Content::Text if self.is_served_as_is(rel_path) => {
                 served_as_is = true;
                 FileRole::BrowserCode
@@ -283,6 +296,18 @@ fn is_build_output(rel_path: &str) -> bool {
     dirs.first()
         .is_some_and(|first| BUILD_DIRS_AT_ROOT.contains(first))
         || dirs.iter().any(|dir| BUILD_DIRS_ANYWHERE.contains(dir))
+}
+
+fn build_output_role(rel_path: &str) -> FileRole {
+    let dirs: Vec<&str> = split_dir(rel_path).0.split('/').collect();
+    match dirs.iter().position(|dir| *dir == NEXT_DIST_DIR) {
+        Some(index) => match dirs.get(index + 1) {
+            Some(&"static") => FileRole::BuildOutput,
+            Some(&"cache") => FileRole::BuildCache,
+            _ => FileRole::ServerBuildOutput,
+        },
+        None => FileRole::BuildOutput,
+    }
 }
 
 fn deepest_root<'a>(roots: &'a BTreeSet<String>, rel_path: &str) -> Option<&'a str> {
@@ -422,6 +447,50 @@ mod tests {
             role(&hints, "src/build/util.ts"),
             Some(FileRole::BrowserCode)
         );
+    }
+
+    #[test]
+    fn next_build_output_is_split_by_where_it_runs() {
+        let hints = ProjectHints::from_paths(
+            [
+                "next.config.mjs",
+                ".next/standalone/next.config.js",
+                "apps/web/.next/standalone/apps/web/next.config.js",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(hints.roots(), vec![String::new()]);
+        assert_eq!(
+            role(&hints, ".next/static/chunks/app/page-1a2b.js"),
+            Some(FileRole::BuildOutput)
+        );
+        assert_eq!(
+            role(&hints, ".next/static/chunks/app/page-1a2b.js.map"),
+            Some(FileRole::BuildOutput)
+        );
+        assert_eq!(
+            role(&hints, ".next/server/app/api/todos/route.js"),
+            Some(FileRole::ServerBuildOutput)
+        );
+        assert_eq!(
+            role(&hints, ".next/standalone/server.js"),
+            Some(FileRole::ServerBuildOutput)
+        );
+        assert_eq!(
+            role(&hints, ".next/required-server-files.json"),
+            Some(FileRole::ServerBuildOutput)
+        );
+        assert_eq!(
+            role(&hints, ".next/cache/fetch-cache/abc.json"),
+            Some(FileRole::BuildCache)
+        );
+        assert_eq!(
+            role(&hints, "apps/web/.next/server/chunks/1.js"),
+            Some(FileRole::ServerBuildOutput)
+        );
+        assert!(!FileRole::ServerBuildOutput.runs_in_browser());
+        assert!(!FileRole::BuildCache.runs_in_browser());
+        assert!(FileRole::BuildOutput.runs_in_browser());
     }
 
     #[test]

@@ -113,7 +113,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             });
         }
         if class.content == Content::Script
-            && class.role != FileRole::BuildOutput
+            && !class.role.is_build_output()
             && let Some(mut facts) = script::analyze(&entry.rel_path, &text)
         {
             uses_supabase |= facts.uses_supabase;

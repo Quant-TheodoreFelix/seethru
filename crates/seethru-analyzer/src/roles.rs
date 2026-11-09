@@ -57,6 +57,8 @@ impl Module {
             self.role,
             FileRole::EdgeFunction
                 | FileRole::BuildOutput
+                | FileRole::ServerBuildOutput
+                | FileRole::BuildCache
                 | FileRole::Migration
                 | FileRole::EnvFile
         )

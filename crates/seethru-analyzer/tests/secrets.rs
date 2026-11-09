@@ -120,6 +120,14 @@ fn secrets_are_reported_by_where_they_live_and_never_leak_into_the_report() {
         &format!("const db = \"{db_url}\";\n"),
     );
     project.write("dist/assets/index-abc.js", &format!("var a=\"{openai}\";"));
+    project.write(
+        ".next/static/chunks/app/page-1a2b.js",
+        &format!("var b=\"{openai}\";"),
+    );
+    project.write(
+        ".next/server/app/api/pay/route.js",
+        &format!("var c=\"{stripe}\";"),
+    );
     let second_stripe = ["sk", "_live_", &body(33)].concat();
     project.write(
         "server/pay.ts",
@@ -131,6 +139,16 @@ fn secrets_are_reported_by_where_they_live_and_never_leak_into_the_report() {
     let mut got = findings(&report);
     got.sort();
     let mut want = vec![
+        (
+            RuleId::SecretInBrowserCode,
+            Severity::Critical,
+            ".next/static/chunks/app/page-1a2b.js".to_owned(),
+        ),
+        (
+            RuleId::SecretInSourceCode,
+            Severity::High,
+            ".next/server/app/api/pay/route.js".to_owned(),
+        ),
         (
             RuleId::SecretInBrowserCode,
             Severity::Critical,

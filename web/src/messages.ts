@@ -15,6 +15,8 @@ export type ComponentLabel =
   | "migration"
   | "envFile"
   | "buildOutput"
+  | "serverBuildOutput"
+  | "buildCache"
   | "binary"
   | "file";
 
@@ -95,6 +97,8 @@ const en: Messages = {
     migration: "Migration",
     envFile: "Env file",
     buildOutput: "Build output",
+    serverBuildOutput: "Server build output",
+    buildCache: "Build cache",
     binary: "Binary",
     file: "File",
   },
@@ -200,6 +204,8 @@ const ko: Messages = {
     migration: "DB 마이그레이션",
     envFile: "환경변수 파일",
     buildOutput: "빌드 결과물",
+    serverBuildOutput: "서버 빌드 결과물",
+    buildCache: "빌드 캐시",
     binary: "바이너리",
     file: "파일",
   },
@@ -289,7 +295,7 @@ function componentLabel(kind: Extract<NodeKind, { type: "component" }>): Compone
     case "config":
       return "envFile";
     case "buildOutput":
-      return "buildOutput";
+      return kind.runtime === "server" ? "serverBuildOutput" : kind.runtime === "build" ? "buildCache" : "buildOutput";
     case "binary":
       return "binary";
     case "other":
