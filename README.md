@@ -28,12 +28,13 @@ cargo run -p seethru-cli -- scan <project path>
 
 The report is written to `<project path>/.seethru/report.html`, and that directory is ignored by git automatically. The report opens as a single file without any outside requests, and every secret it finds is masked so the raw value never appears.
 
-| Option        | What it does                                                                       |
-|---------------|------------------------------------------------------------------------------------|
-| `--out FILE`  | Write the HTML report to `FILE` instead                                            |
-| `--json`      | Print the scan report as JSON instead of writing HTML                              |
-| `--lang ko`   | Show the summary and the report in Korean (default is `en`)                        |
-| `--no-config` | Ignore `seethru.toml` in the scanned project (see [Configuration](#configuration)) |
+| Option               | What it does                                                                       |
+|----------------------|------------------------------------------------------------------------------------|
+| `--out FILE`         | Write the HTML report to `FILE` instead                                            |
+| `--json`             | Print the scan report as JSON instead of writing HTML                              |
+| `--lang ko`          | Show the summary and the report in Korean (default is `en`)                        |
+| `--no-config`        | Ignore `seethru.toml` in the scanned project (see [Configuration](#configuration)) |
+| `--build-output DIR` | Read the Vite or Next build output in DIR, a folder inside the project             |
 
 
 | Check                     | What it finds                                                                                |
@@ -90,6 +91,22 @@ reason = "orders was made in the dashboard and has RLS on there"
 - Accepted findings stay in the report and the CLI summary under their own heading, with the reason. They do not count toward the totals or color the graph.
 - If `seethru.toml` cannot be used, the scan stops and names the line instead of ignoring it. That covers unknown keys, a missing reason, an unknown rule ID and invalid patterns. The file must be a regular file of up to 64 KB, with at most 256 `exclude` patterns and 1,000 `[[accept]]` entries.
 - `--no-config` ignores the file. Use it when you review a project someone else wrote, so its config cannot hide anything from you.
+
+## Build output
+
+seethru never runs your build. Build the project yourself, then pass the output folder.
+
+```bash
+$ seethru scan . --build-output dist
+$ seethru scan . --build-output .next
+```
+
+- The folder must be inside the scanned project and must not be a symbolic link. It is read even when an `exclude` pattern matches it.
+- **Vite**: turn on `build.manifest` and `build.sourcemap` in `vite.config` so seethru can see every file in the bundle. With source maps for every chunk, files that the bundle leaves out are no longer treated as browser code.
+- **Next**: seethru reads `.next`. The `"use client"` files are confirmed from the build manifests. To confirm every file that reaches the browser, set `productionBrowserSourceMaps: true` in `next.config`. Routes from the build appear as entry points in the graph.
+- Findings on files that the build output confirms are no longer marked as likely. A secret found in a bundle points back to its source line through the source map.
+- If any source file is newer than the build output by more than 2 seconds, the build output is not used and the report says so under "Not checked". Build again and rerun.
+- Even without the option, files under `.next/server` and `.next/standalone` are treated as server code, `.next/static` as browser code and `.next/cache` as build cache.
 
 ## Safety by design
 
