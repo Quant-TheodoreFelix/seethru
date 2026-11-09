@@ -11,7 +11,7 @@ mod secrets;
 mod supabase;
 mod walk;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -89,6 +89,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut configs = Vec::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
+    let mut uses_supabase = false;
 
     for entry in &walked.entries {
         let Some(class) = hints.classify(&entry.rel_path) else {
@@ -101,6 +102,8 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         scanned = scanned.saturating_add(1);
         if class.content == Content::Sql {
             migrations.apply_file(&entry.rel_path, &text);
+            uses_supabase |=
+                entry.rel_path.starts_with("supabase/") || entry.rel_path.contains("/supabase/");
         }
         if is_resolver_config(&entry.rel_path, class) && text.len() <= MAX_RESOLVER_CONFIG_BYTES {
             configs.push(ConfigText {
@@ -112,6 +115,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             && class.role != FileRole::BuildOutput
             && let Some(mut facts) = script::analyze(&entry.rel_path, &text)
         {
+            uses_supabase |= facts.uses_supabase;
             modules.push(Module {
                 rel_path: entry.rel_path.clone(),
                 role: class.role,
@@ -132,11 +136,36 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let role_of =
         |rel_path: &str, fallback: FileRole| roles.get(rel_path).copied().unwrap_or(fallback);
 
+    let mut first_use: BTreeMap<String, Location> = BTreeMap::new();
+    if uses_supabase {
+        for record in &scripts {
+            for (table, _, location) in &record.queries {
+                if !migrations.is_view("public", table) {
+                    first_use
+                        .entry(table.clone())
+                        .or_insert_with(|| location.clone());
+                }
+            }
+        }
+    }
+
     let mut graph = Graph::default();
     migrations.emit(&mut graph);
     for record in scripts {
         let role = role_of(&record.rel_path, FileRole::UnknownCode);
         record.emit(&mut graph, role);
+    }
+    for (table, location) in first_use {
+        let table_id = NodeId::new(format!("table:public.{table}"));
+        if graph.table_rls(&table_id) == Some(seethru_core::RlsStatus::Unknown) {
+            graph.add_finding(
+                RuleId::SupabaseTableSchemaMissing,
+                Severity::Info,
+                rules::table_schema_missing(&table),
+                table_id,
+                Some(location),
+            );
+        }
     }
     for record in secret_records {
         let role = role_of(&record.rel_path, record.class.role);

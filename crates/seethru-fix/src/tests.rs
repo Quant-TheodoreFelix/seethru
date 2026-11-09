@@ -159,3 +159,67 @@ fn secret_prompts_never_carry_the_value_and_strip_hostile_names() {
         assert!(prompt.contains(name), "{prompt}");
     }
 }
+
+#[test]
+fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
+    let table = Node {
+        id: NodeId::new("table:public.orders"),
+        label: "orders".to_owned(),
+        kind: NodeKind::Table {
+            schema: "public".to_owned(),
+            rls: seethru_core::RlsStatus::Unknown,
+        },
+        location: None,
+    };
+    let finding = Finding {
+        id: "supabase-table-schema-missing:table:public.orders".to_owned(),
+        rule: RuleId::SupabaseTableSchemaMissing,
+        severity: Severity::Info,
+        title: LocalizedText::default(),
+        explanation: LocalizedText::default(),
+        node: table.id.clone(),
+        location: Some(Location {
+            path: "src/pages/Orders.tsx".to_owned(),
+            line: 3,
+            column: 9,
+        }),
+        fix_prompt: None,
+        accepted: None,
+    };
+    let report = ScanReport {
+        schema_version: SCHEMA_VERSION,
+        tool: ToolInfo {
+            name: "seethru".to_owned(),
+            version: "0".to_owned(),
+        },
+        target: TargetInfo {
+            name: "t".to_owned(),
+            files_scanned: 1,
+            files_skipped: 0,
+            files_excluded: 0,
+            truncated: false,
+            config_file: None,
+        },
+        summary: Summary::default(),
+        nodes: vec![table],
+        edges: Vec::new(),
+        findings: vec![finding],
+    };
+    for (lang, closing) in [(Lang::En, CLOSING_EN), (Lang::Ko, CLOSING_KO)] {
+        let prompt = report
+            .findings
+            .first()
+            .map(|finding| fix_prompt(&report, finding, lang))
+            .unwrap_or_default();
+        assert!(
+            prompt.contains("alter table public.orders enable row level security;"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("`src/pages/Orders.tsx:3`"), "{prompt}");
+        assert!(
+            prompt.contains("supabase db dump --schema public"),
+            "{prompt}"
+        );
+        assert!(prompt.ends_with(closing), "{prompt}");
+    }
+}

@@ -63,6 +63,13 @@ impl Graph {
         })
     }
 
+    pub(crate) fn table_rls(&self, id: &NodeId) -> Option<seethru_core::RlsStatus> {
+        match self.nodes.get(id)?.kind {
+            NodeKind::Table { rls, .. } => Some(rls),
+            _ => None,
+        }
+    }
+
     pub(crate) fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
         self.edges.insert(Edge { from, to, kind });
     }

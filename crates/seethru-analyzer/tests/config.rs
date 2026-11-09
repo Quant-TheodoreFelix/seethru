@@ -1,39 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
+mod common;
 
+use common::TempProject;
 use seethru_analyzer::{ScanError, ScanOptions};
 use seethru_core::RuleId;
-
-struct TempProject {
-    root: PathBuf,
-}
-
-impl TempProject {
-    fn new(name: &str) -> Self {
-        let root =
-            std::env::temp_dir().join(format!("seethru-config-test-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let created = fs::create_dir_all(&root);
-        assert!(created.is_ok(), "{created:?}");
-        Self { root }
-    }
-
-    fn write(&self, rel_path: &str, content: &str) {
-        let path = self.root.join(rel_path);
-        if let Some(parent) = path.parent() {
-            let created = fs::create_dir_all(parent);
-            assert!(created.is_ok(), "{created:?}");
-        }
-        let written = fs::write(path, content);
-        assert!(written.is_ok(), "{written:?}");
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
 
 const MIGRATION: &str = "\
 create table public.products (id bigint primary key, name text);

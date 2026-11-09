@@ -11,6 +11,7 @@ pub(crate) const MAX_SCRIPT_BYTES: usize = 1024 * 1024;
 const MAX_NESTING: usize = 512;
 const MAX_IMPORTS: usize = 2_000;
 const SERVER_ONLY_MODULE: &str = "server-only";
+const SUPABASE_PACKAGES: &str = "@supabase/";
 const QUERY_METHODS: &[(&str, Access)] = &[
     ("select", Access::Read),
     ("insert", Access::Write),
@@ -57,6 +58,7 @@ pub(crate) struct TableQuery {
 pub(crate) struct Facts {
     pub directive: Option<Directive>,
     pub server_only: bool,
+    pub uses_supabase: bool,
     pub imports: Vec<String>,
     pub env_reads: Vec<EnvRead>,
     pub queries: Vec<TableQuery>,
@@ -117,6 +119,9 @@ struct Collector {
 
 impl Collector {
     fn import(&mut self, specifier: &str) {
+        if specifier.starts_with(SUPABASE_PACKAGES) {
+            self.facts.uses_supabase = true;
+        }
         if specifier == SERVER_ONLY_MODULE {
             self.facts.server_only = true;
         } else if self.facts.imports.len() < MAX_IMPORTS
@@ -351,6 +356,12 @@ mod tests {
         "#;
         let facts = analyze("src/x.ts", source).unwrap_or_default();
         assert!(facts.server_only);
+        assert!(!facts.uses_supabase);
+        let supabase = analyze(
+            "src/y.ts",
+            "import { createClient } from \"@supabase/supabase-js\";",
+        );
+        assert!(supabase.is_some_and(|facts| facts.uses_supabase));
         assert_eq!(
             facts.imports,
             vec!["react", "./a", "@/c", "../e", "./f", "./g"]

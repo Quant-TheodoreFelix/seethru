@@ -316,7 +316,8 @@
         "supabase-service-role-in-browser",
         "secret-in-browser-code",
         "secret-in-source-code",
-        "secret-in-public-env-var"
+        "secret-in-public-env-var",
+        "supabase-table-schema-missing"
       ],
       "type": "string"
     },

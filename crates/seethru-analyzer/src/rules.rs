@@ -122,6 +122,30 @@ pub(crate) fn service_role_in_browser(var: &str, prefix: &str) -> Text {
     }
 }
 
+pub(crate) fn table_schema_missing(table: &str) -> Text {
+    let table = display_name(table);
+    Text {
+        title: LocalizedText {
+            en: format!("The `{table}` table has no schema in this repo"),
+            ko: format!("`{table}` 테이블의 스키마가 저장소에 없어요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "Your code uses the `{table}` table, but no SQL file in this repo creates it or turns RLS on, \
+                 so seethru cannot tell whether RLS protects it. A table made in the Supabase dashboard \
+                 is open to anyone with the anon key until RLS is turned on. Check the table in the dashboard, \
+                 or save the schema in the repo with `supabase db dump` so seethru can check it."
+            ),
+            ko: format!(
+                "코드에서 `{table}` 테이블을 쓰지만 저장소의 SQL 파일 어디에도 이 테이블을 만들거나 RLS를 켜는 부분이 없어서, \
+                 RLS가 보호하고 있는지 알 수 없어요. Supabase 대시보드에서 만든 테이블은 RLS를 켜기 전까지 \
+                 anon 키만 있으면 누구나 접근할 수 있어요. 대시보드에서 이 테이블을 확인하거나, \
+                 `supabase db dump`로 스키마를 저장소에 저장하면 seethru가 검사할 수 있어요."
+            ),
+        },
+    }
+}
+
 fn secret_label(kind: SecretKind, lang: Lang) -> &'static str {
     let (en, ko) = match kind {
         SecretKind::SupabaseServiceRoleKey => {
@@ -296,7 +320,7 @@ mod tests {
 
     use super::{
         Text, display_name, policy_unrestricted, rls_disabled, secret_in_browser,
-        secret_in_public_env, secret_in_source, service_role_in_browser,
+        secret_in_public_env, secret_in_source, service_role_in_browser, table_schema_missing,
     };
 
     const SECRET_KINDS: [SecretKind; 9] = [
@@ -322,6 +346,7 @@ mod tests {
     fn every_text() -> Vec<Text> {
         let mut texts = vec![
             rls_disabled("todos"),
+            table_schema_missing("orders"),
             service_role_in_browser("VITE_SUPABASE_SERVICE_ROLE_KEY", "VITE_"),
         ];
         for command in COMMANDS {

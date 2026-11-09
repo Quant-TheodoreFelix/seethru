@@ -1,6 +1,6 @@
 mod lexer;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use seethru_core::{
     EdgeKind, FileRole, Location, Node, NodeId, NodeKind, PolicyCommand, RlsStatus, RuleId,
@@ -60,6 +60,7 @@ pub(crate) struct Migrations {
     tables: BTreeMap<TableKey, Table>,
     policies: BTreeMap<(TableKey, String), Policy>,
     defined_in: BTreeMap<TableKey, String>,
+    views: BTreeSet<TableKey>,
 }
 
 impl Migrations {
@@ -78,9 +79,17 @@ impl Migrations {
             let mut cursor = Cursor::new(statement);
             if cursor.eat("create") {
                 cursor.eat_seq(&["or", "replace"]);
+                cursor.eat("temporary");
+                cursor.eat("temp");
+                cursor.eat("recursive");
+                cursor.eat("materialized");
                 if cursor.eat("table") || cursor.eat_seq(&["unlogged", "table"]) {
                     if let Some(key) = cursor.table_name_after_if_not_exists() {
                         self.create_table(key, at, rel_path);
+                    }
+                } else if cursor.eat("view") {
+                    if let Some(key) = cursor.table_name_after_if_not_exists() {
+                        self.views.insert(key);
                     }
                 } else if cursor.eat("policy") {
                     self.create_policy(&mut cursor, at);
@@ -252,6 +261,13 @@ impl Migrations {
         }
         self.table_mut(key.clone());
         self.policies.insert((key, name), policy);
+    }
+
+    pub(crate) fn is_view(&self, schema: &str, name: &str) -> bool {
+        self.views.contains(&TableKey {
+            schema: schema.to_owned(),
+            name: name.to_owned(),
+        })
     }
 
     pub(crate) fn emit(self, graph: &mut Graph) {

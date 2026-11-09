@@ -251,6 +251,7 @@ pub enum RuleId {
     SecretInBrowserCode,
     SecretInSourceCode,
     SecretInPublicEnvVar,
+    SupabaseTableSchemaMissing,
 }
 
 impl RuleId {
@@ -262,6 +263,7 @@ impl RuleId {
             Self::SecretInBrowserCode => "secret-in-browser-code",
             Self::SecretInSourceCode => "secret-in-source-code",
             Self::SecretInPublicEnvVar => "secret-in-public-env-var",
+            Self::SupabaseTableSchemaMissing => "supabase-table-schema-missing",
         }
     }
 }

@@ -38,6 +38,9 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
         (RuleId::SupabaseRlsDisabled, Some(NodeKind::Table { schema, .. })) => {
             rls_disabled(report, finding, schema, label, &place, lang)
         }
+        (RuleId::SupabaseTableSchemaMissing, Some(NodeKind::Table { schema, .. })) => {
+            table_schema_missing(report, finding, schema, label, &place, lang)
+        }
         (RuleId::SupabasePolicyUnrestricted, Some(NodeKind::Policy { command, roles, .. })) => {
             let table = table_of_policy(report, finding).unwrap_or_default();
             let roles = roles
@@ -92,6 +95,40 @@ fn rls_disabled(
              1. 새 마이그레이션 파일을 만들어서 `alter table {table} enable row level security;`를 추가해 줘.\n\
              2. 이 테이블을 쓰는 코드를 보고, 로그인한 사용자가 자기 행만 읽고 쓸 수 있는 정책을 같은 파일에 만들어 줘. 예를 들면 `using ((select auth.uid()) = user_id)`처럼 소유자 컬럼을 써.\n\
              3. 이미 적용된 마이그레이션 파일은 고치지 마."
+        ),
+    }
+}
+
+fn table_schema_missing(
+    report: &ScanReport,
+    finding: &Finding,
+    schema: &str,
+    label: &str,
+    place: &str,
+    lang: Lang,
+) -> String {
+    let name = label.rsplit('.').next().unwrap_or(label);
+    let table = format!("{}.{}", clean(schema), clean(name));
+    let users = related_files(
+        report,
+        finding,
+        &[EdgeKind::Queries, EdgeKind::Writes],
+        lang,
+    );
+    match lang {
+        Lang::En => format!(
+            "The Supabase `{table}` table is used in code, but no migration in this repo creates it or turns on row level security (RLS), so it is not clear whether RLS protects it.{place}{users}\n\
+             1. Create a new migration file that adds `alter table {table} enable row level security;`. It is safe to run even if RLS is already on.\n\
+             2. Look at the code that uses this table and add policies to the same file so signed-in users can read and write only their own rows. For example, use the owner column as in `using ((select auth.uid()) = user_id)`.\n\
+             3. If the Supabase CLI is linked to this project, save the current schema in the repo with `supabase db dump --schema public`.\n\
+             Tell me which policies you added so I can compare them with the ones already in the Supabase dashboard."
+        ),
+        Lang::Ko => format!(
+            "Supabase `{table}` 테이블을 코드에서 쓰고 있지만 저장소의 마이그레이션 어디에도 이 테이블을 만들거나 RLS(행 수준 보안)를 켜는 부분이 없어서, RLS가 보호하고 있는지 알 수 없어.{place}{users}\n\
+             1. 새 마이그레이션 파일을 만들어서 `alter table {table} enable row level security;`를 추가해 줘. RLS가 이미 켜져 있어도 문제없이 실행돼.\n\
+             2. 이 테이블을 쓰는 코드를 보고, 로그인한 사용자가 자기 행만 읽고 쓸 수 있는 정책을 같은 파일에 만들어 줘. 예를 들면 `using ((select auth.uid()) = user_id)`처럼 소유자 컬럼을 써.\n\
+             3. Supabase CLI가 이 프로젝트에 연결되어 있다면 `supabase db dump --schema public`으로 지금 스키마를 저장소에 저장해 줘.\n\
+             어떤 정책을 추가했는지 알려 주면 Supabase 대시보드에 이미 있는 정책과 비교해 볼게."
         ),
     }
 }
