@@ -1,11 +1,11 @@
 use seethru_core::{
-    AccessRuleDetail, Basis, Confidence, DataStoreDetail, EdgeKind, Node, NodeId, NodeKind,
-    PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
+    AccessRuleDetail, Basis, BucketVisibility, Confidence, DataStoreDetail, EdgeKind, Node, NodeId,
+    NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
 };
 
 use super::{
-    ANONYMOUS_ROLES, DEFAULT_SCHEMA, EXPOSED_SCHEMAS, MANAGED_SCHEMAS, Migrations, Policy,
-    SIGNED_IN_ROLES, TableKey,
+    ANONYMOUS_ROLES, Condition, DEFAULT_SCHEMA, EXPOSED_SCHEMAS, MANAGED_SCHEMAS, Migrations,
+    Policy, SIGNED_IN_ROLES, TableKey,
 };
 use crate::classify::FileRole;
 use crate::graph::{Graph, Verdict, file_location, file_step, step};
@@ -68,7 +68,12 @@ impl Migrations {
             }
         }
 
+        self.emit_buckets(graph);
         for ((key, name), policy) in &self.policies {
+            if key.schema == "storage" && key.name == "objects" {
+                self.emit_storage_policy(graph, name, policy);
+                continue;
+            }
             if MANAGED_SCHEMAS.contains(&key.schema.as_str()) {
                 continue;
             }
@@ -136,6 +141,100 @@ impl Migrations {
             }
         }
     }
+
+    fn emit_buckets(&self, graph: &mut Graph) {
+        for (id, bucket) in &self.buckets {
+            let bucket_id = self.bucket_node(graph, id);
+            if let Some(at) = &bucket.defined_at {
+                let file_id = graph.add_file(&at.path, FileRole::Migration, Basis::Path);
+                graph.add_edge(file_id, bucket_id, EdgeKind::Defines);
+            }
+        }
+    }
+
+    fn bucket_node(&self, graph: &mut Graph, id: &str) -> NodeId {
+        let bucket = self.buckets.get(id);
+        graph.add_node(Node {
+            id: bucket_id(id),
+            label: id.to_owned(),
+            kind: NodeKind::DataStore {
+                detail: Some(DataStoreDetail::StorageBucket {
+                    visibility: bucket
+                        .map_or(BucketVisibility::Unknown, |bucket| bucket.visibility),
+                }),
+            },
+            zone: Zone::Database,
+            location: bucket.and_then(|bucket| bucket.defined_at.clone()),
+        })
+    }
+
+    fn emit_storage_policy(&self, graph: &mut Graph, name: &str, policy: &Policy) {
+        let condition = deciding_condition(policy);
+        let policy_id = NodeId::new(format!("policy:storage.objects/{name}"));
+        graph.add_node(Node {
+            id: policy_id.clone(),
+            label: name.to_owned(),
+            kind: NodeKind::AccessRule {
+                scope: if condition.open {
+                    RuleScope::Open
+                } else {
+                    RuleScope::Conditional
+                },
+                strength: None,
+                detail: Some(AccessRuleDetail::PostgresPolicy {
+                    command: policy.command,
+                    roles: policy.roles.clone(),
+                }),
+            },
+            zone: Zone::Database,
+            location: Some(policy.location.clone()),
+        });
+        for bucket in policy.using.buckets.union(&policy.check.buckets) {
+            let bucket_id = self.bucket_node(graph, bucket);
+            graph.add_edge(bucket_id, policy_id.clone(), EdgeKind::GuardedBy);
+        }
+        if !policy.permissive || !condition.open {
+            return;
+        }
+        let Some(reach) = reach_of(&policy.roles, condition.signed_in) else {
+            return;
+        };
+        let buckets: Vec<String> = condition.buckets.iter().cloned().collect();
+        let mut evidence = Vec::new();
+        if let Some(first) = buckets.first() {
+            evidence.push(step(
+                first,
+                None,
+                Some(bucket_id(first)),
+                self.buckets
+                    .get(first)
+                    .and_then(|bucket| bucket.defined_at.clone()),
+            ));
+        }
+        evidence.push(step(
+            name,
+            evidence.first().map(|_| EdgeKind::GuardedBy),
+            Some(policy_id.clone()),
+            Some(policy.location.clone()),
+        ));
+        graph.add_finding(
+            Verdict {
+                rule: RuleId::SupabaseStoragePolicyUnrestricted,
+                severity: policy_severity(reach, policy.command),
+                confidence: Confidence::Certain,
+                from_build: false,
+            },
+            rules::storage_policy_unrestricted(
+                name,
+                &buckets,
+                reach == Reach::Anyone,
+                policy.command,
+            ),
+            policy_id,
+            Some(policy.location.clone()),
+            evidence,
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,5 +297,32 @@ fn table_label(key: &TableKey) -> String {
         key.name.clone()
     } else {
         format!("{}.{}", key.schema, key.name)
+    }
+}
+
+fn bucket_id(id: &str) -> NodeId {
+    NodeId::new(format!("store:storageBucket:{id}"))
+}
+
+fn deciding_condition(policy: &Policy) -> &Condition {
+    match policy.command {
+        PolicyCommand::Insert => &policy.check,
+        PolicyCommand::Select
+        | PolicyCommand::Update
+        | PolicyCommand::Delete
+        | PolicyCommand::All => &policy.using,
+    }
+}
+
+fn reach_of(roles: &[String], signed_in: bool) -> Option<Reach> {
+    let has = |names: &[&str]| roles.iter().any(|role| names.contains(&role.as_str()));
+    if signed_in {
+        (has(&["public"]) || has(SIGNED_IN_ROLES)).then_some(Reach::SignedIn)
+    } else if has(ANONYMOUS_ROLES) {
+        Some(Reach::Anyone)
+    } else if has(SIGNED_IN_ROLES) {
+        Some(Reach::SignedIn)
+    } else {
+        None
     }
 }

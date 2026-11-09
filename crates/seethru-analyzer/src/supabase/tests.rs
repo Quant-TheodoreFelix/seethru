@@ -1,6 +1,6 @@
 use seethru_core::{
-    AccessRuleDetail, DataStoreDetail, NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope,
-    Severity, TargetInfo,
+    AccessRuleDetail, BucketVisibility, Confidence, DataStoreDetail, EdgeKind, NodeKind,
+    PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, TargetInfo,
 };
 
 use super::Migrations;
@@ -281,4 +281,121 @@ fn migration_file_defines_its_tables() {
     assert!(report.edges.iter().any(|edge| edge.from.as_str()
         == "file:supabase/migrations/1_init.sql"
         && edge.to.as_str() == "table:public.todos"));
+}
+
+fn finding<'a>(
+    report: &'a seethru_core::ScanReport,
+    rule: RuleId,
+    node: &str,
+) -> Option<&'a seethru_core::Finding> {
+    report
+        .findings
+        .iter()
+        .find(|finding| finding.rule == rule && finding.node.as_str() == node)
+}
+
+fn node_kind<'a>(report: &'a seethru_core::ScanReport, id: &str) -> Option<&'a NodeKind> {
+    report
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == id)
+        .map(|node| &node.kind)
+}
+
+fn has_edge(report: &seethru_core::ScanReport, from: &str, to: &str, kind: EdgeKind) -> bool {
+    report
+        .edges
+        .iter()
+        .any(|edge| edge.from.as_str() == from && edge.to.as_str() == to && edge.kind == kind)
+}
+
+const STORAGE: &str = "supabase/migrations/2_storage.sql";
+
+#[test]
+fn storage_policy_that_only_names_the_bucket_is_reported() {
+    let report = run(&[(
+        STORAGE,
+        "insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true);
+         create policy \"Read avatars\" on storage.objects for select using (bucket_id = 'avatars');
+         create policy \"Upload docs\" on storage.objects for insert with check (bucket_id = 'docs');
+         create policy \"Signed in edit\" on storage.objects for update
+           using (bucket_id = 'docs' and auth.uid() is not null);
+         create policy \"Own docs\" on storage.objects for delete
+           using (bucket_id = 'docs' and (storage.foldername(name))[1] = auth.uid()::text);",
+    )]);
+    let rule = RuleId::SupabaseStoragePolicyUnrestricted;
+    let read = finding(&report, rule, "policy:storage.objects/Read avatars");
+    assert_eq!(read.map(|f| f.severity), Some(Severity::Medium));
+    assert_eq!(read.map(|f| f.confidence), Some(Confidence::Certain));
+    assert_eq!(
+        finding(&report, rule, "policy:storage.objects/Upload docs").map(|f| f.severity),
+        Some(Severity::High)
+    );
+    assert_eq!(
+        finding(&report, rule, "policy:storage.objects/Signed in edit").map(|f| f.severity),
+        Some(Severity::High)
+    );
+    assert!(finding(&report, rule, "policy:storage.objects/Own docs").is_none());
+    assert_eq!(
+        node_kind(&report, "store:storageBucket:avatars"),
+        Some(&NodeKind::DataStore {
+            detail: Some(DataStoreDetail::StorageBucket {
+                visibility: BucketVisibility::Public
+            })
+        })
+    );
+    assert_eq!(
+        node_kind(&report, "store:storageBucket:docs"),
+        Some(&NodeKind::DataStore {
+            detail: Some(DataStoreDetail::StorageBucket {
+                visibility: BucketVisibility::Unknown
+            })
+        })
+    );
+    assert!(has_edge(
+        &report,
+        "file:supabase/migrations/2_storage.sql",
+        "store:storageBucket:avatars",
+        EdgeKind::Defines
+    ));
+    assert!(has_edge(
+        &report,
+        "store:storageBucket:docs",
+        "policy:storage.objects/Own docs",
+        EdgeKind::GuardedBy
+    ));
+    let steps: Vec<Option<&str>> = read
+        .map(|f| {
+            f.evidence
+                .iter()
+                .map(|s| s.node.as_ref().map(|n| n.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        steps,
+        vec![
+            Some("store:storageBucket:avatars"),
+            Some("policy:storage.objects/Read avatars")
+        ]
+    );
+}
+
+#[test]
+fn storage_policies_for_service_role_or_restrictive_are_not_reported() {
+    let report = run(&[(
+        STORAGE,
+        "create policy \"Service\" on storage.objects for all to service_role using (true);
+         create policy \"Gate\" on storage.objects as restrictive for select using (bucket_id = 'a');
+         create policy \"Anon signed in\" on storage.objects for select to anon
+           using (bucket_id = 'a' and auth.uid() is not null);",
+    )]);
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.rule != RuleId::SupabaseStoragePolicyUnrestricted),
+        "{:?}",
+        findings(&report)
+    );
 }

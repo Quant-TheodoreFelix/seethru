@@ -67,6 +67,21 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             service_role_in_browser(&clean(label), &place, &readers, lang)
         }
         (
+            RuleId::SupabaseStoragePolicyUnrestricted,
+            Some(NodeKind::AccessRule {
+                detail: Some(AccessRuleDetail::PostgresPolicy { command, roles }),
+                ..
+            }),
+        ) => {
+            let roles = roles
+                .iter()
+                .map(|role| clean(role))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let buckets = buckets_of_policy(report, finding);
+            storage_policy_unrestricted(&clean(label), *command, &roles, &buckets, &place, lang)
+        }
+        (
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
             Some(NodeKind::Credential {
                 detail: CredentialDetail::Secret { secret_kind, .. },
@@ -159,6 +174,49 @@ fn policy_unrestricted(
              2. 이미 적용된 마이그레이션 파일은 고치지 마.\n\
              3. 모두에게 공개하려고 일부러 만든 정책이라면 바꾸지 말고 그렇다고 알려 줘."
         ),
+    }
+}
+
+fn storage_policy_unrestricted(
+    policy: &str,
+    command: PolicyCommand,
+    roles: &str,
+    buckets: &str,
+    place: &str,
+    lang: Lang,
+) -> String {
+    let command = command_name(command);
+    match lang {
+        Lang::En => {
+            let scope = if buckets.is_empty() {
+                "every file in Supabase Storage".to_owned()
+            } else if buckets.contains(", ") {
+                format!("every file in the {buckets} buckets")
+            } else {
+                format!("every file in the {buckets} bucket")
+            };
+            format!(
+                "The `{policy}` policy on Supabase Storage (`{command}` for {roles}) does not check whose file it is, so {scope} is open.{place}\n\
+                 1. Create a new migration file that drops this policy with `drop policy` on `storage.objects` and creates it again with a condition that lets each user reach only their own files. For example, keep files in a folder named after the user ID and add `(storage.foldername(name))[1] = (select auth.uid())::text`.\n\
+                 2. If the upload code does not put files in such a folder yet, change it so it does.\n\
+                 3. Do not edit migration files that have already been applied.\n\
+                 4. If these files are meant to be public, do not change the policy and tell me so."
+            )
+        }
+        Lang::Ko => {
+            let scope = if buckets.is_empty() {
+                "Supabase Storage의 모든 파일".to_owned()
+            } else {
+                format!("{buckets} 버킷의 모든 파일")
+            };
+            format!(
+                "Supabase Storage의 `{policy}` 정책(`{command}`, 대상 {roles})은 누구의 파일인지 확인하지 않아서 {scope}이 열려 있어.{place}\n\
+                 1. 새 마이그레이션 파일을 만들어서 `storage.objects`의 이 정책을 지우고(`drop policy`), 사용자가 자기 파일만 다룰 수 있는 조건으로 다시 만들어 줘. 예를 들면 파일을 사용자 ID 이름의 폴더에 두고 `(storage.foldername(name))[1] = (select auth.uid())::text` 조건을 써.\n\
+                 2. 업로드 코드가 아직 그런 폴더에 파일을 두지 않는다면 그렇게 바꿔 줘.\n\
+                 3. 이미 적용된 마이그레이션 파일은 고치지 마.\n\
+                 4. 모두에게 공개하려고 일부러 만든 파일이라면 정책을 바꾸지 말고 그렇다고 알려 줘."
+            )
+        }
     }
 }
 
@@ -283,6 +341,26 @@ fn table_of_policy(report: &ScanReport, finding: &Finding) -> Option<String> {
         .find(|edge| edge.kind == EdgeKind::GuardedBy && edge.to == finding.node)
         .and_then(|edge| report.nodes.iter().find(|node| node.id == edge.from))
         .map(|node: &Node| clean(&node.label))
+}
+
+fn buckets_of_policy(report: &ScanReport, finding: &Finding) -> String {
+    report
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::GuardedBy && edge.to == finding.node)
+        .filter_map(|edge| report.nodes.iter().find(|node| node.id == edge.from))
+        .filter(|node| {
+            matches!(
+                node.kind,
+                NodeKind::DataStore {
+                    detail: Some(DataStoreDetail::StorageBucket { .. })
+                }
+            )
+        })
+        .map(|node| format!("`{}`", clean(&node.label)))
+        .take(MAX_RELATED_FILES)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn related_files(report: &ScanReport, finding: &Finding, kinds: &[EdgeKind], lang: Lang) -> String {

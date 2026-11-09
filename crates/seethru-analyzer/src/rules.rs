@@ -146,6 +146,73 @@ pub(crate) fn table_schema_missing(table: &str) -> Text {
     }
 }
 
+fn who(anyone: bool) -> (&'static str, &'static str) {
+    if anyone {
+        (
+            "anyone, even people who are not signed in,",
+            "로그인하지 않은 사람을 포함한 누구나",
+        )
+    } else {
+        ("any signed-in user", "로그인한 사용자라면 누구나")
+    }
+}
+
+pub(crate) fn storage_policy_unrestricted(
+    policy: &str,
+    buckets: &[String],
+    anyone: bool,
+    command: PolicyCommand,
+) -> Text {
+    let policy = display_name(policy);
+    let (who_en, who_ko) = who(anyone);
+    let names: Vec<String> = buckets
+        .iter()
+        .map(|bucket| format!("`{}`", display_name(bucket)))
+        .collect();
+    let (where_en, where_ko) = match names.as_slice() {
+        [] => ("every bucket".to_owned(), "모든 버킷".to_owned()),
+        [one] => (format!("the {one} bucket"), format!("{one} 버킷")),
+        many => (
+            format!("the {} buckets", many.join(", ")),
+            format!("{} 버킷", many.join(", ")),
+        ),
+    };
+    let (what_en, what_ko) = match command {
+        PolicyCommand::All => (
+            "download, replace and delete every file",
+            "모든 파일을 내려받고, 바꾸고, 지울 수 있어요",
+        ),
+        PolicyCommand::Select => ("download every file", "모든 파일을 내려받을 수 있어요"),
+        PolicyCommand::Insert => ("upload any file", "아무 파일이나 올릴 수 있어요"),
+        PolicyCommand::Update => (
+            "replace files that belong to other people",
+            "다른 사람의 파일까지 바꿀 수 있어요",
+        ),
+        PolicyCommand::Delete => (
+            "delete files that belong to other people",
+            "다른 사람의 파일까지 지울 수 있어요",
+        ),
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("The `{policy}` policy opens every file in {where_en}"),
+            ko: format!("`{policy}` 정책이 {where_ko}의 모든 파일을 열어 두고 있어요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "This storage policy does not check whose file it is, so {who_en} can {what_en} in {where_en}. \
+                 The condition should usually allow only the user's own files, for example files in a folder named after the user. \
+                 If the files are meant to be shared with everyone, you can leave it as it is."
+            ),
+            ko: format!(
+                "이 스토리지 정책은 누구의 파일인지 확인하지 않아서 {who_ko} {where_ko}에서 {what_ko}. \
+                 보통은 사용자 이름으로 된 폴더처럼 본인 파일만 허용하는 조건이 필요해요. \
+                 모두에게 공개하려고 일부러 만든 정책이라면 그대로 두어도 괜찮아요."
+            ),
+        },
+    }
+}
+
 fn secret_label(kind: SecretKind, lang: Lang) -> &'static str {
     let (en, ko) = match kind {
         SecretKind::SupabaseServiceRoleKey => {
@@ -348,7 +415,8 @@ mod tests {
 
     use super::{
         Text, display_name, policy_unrestricted, rls_disabled, secret_in_browser,
-        secret_in_public_env, secret_in_source, service_role_in_browser, table_schema_missing,
+        secret_in_public_env, secret_in_source, service_role_in_browser,
+        storage_policy_unrestricted, table_schema_missing,
     };
 
     const SECRET_KINDS: [SecretKind; 9] = [
@@ -382,6 +450,22 @@ mod tests {
                 texts.push(policy_unrestricted("posts", "Edit posts", anyone, command));
             }
         }
+        for anyone in [true, false] {
+            for command in COMMANDS {
+                for buckets in [
+                    Vec::new(),
+                    vec!["avatars".to_owned()],
+                    vec!["avatars".to_owned(), "docs".to_owned()],
+                ] {
+                    texts.push(storage_policy_unrestricted(
+                        "Public files",
+                        &buckets,
+                        anyone,
+                        command,
+                    ));
+                }
+            }
+        }
         for kind in SECRET_KINDS {
             texts.push(secret_in_browser(kind, "dist/app.js"));
             texts.push(secret_in_public_env(kind, "VITE_KEY"));
@@ -408,6 +492,14 @@ mod tests {
                 assert!(has_hangul(&part.ko), "{part:?}");
                 assert_eq!(names(&part.en), names(&part.ko), "{part:?}");
                 assert!(!part.ko.contains('\u{2014}'), "{part:?}");
+                assert!(
+                    !part
+                        .en
+                        .split(". ")
+                        .skip(1)
+                        .any(|sentence| sentence.starts_with(|c: char| c.is_ascii_lowercase())),
+                    "{part:?}"
+                );
             }
         }
     }
