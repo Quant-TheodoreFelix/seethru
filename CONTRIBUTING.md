@@ -72,9 +72,9 @@ The scan report in `crates/seethru-core/src/report.rs` is a format that the web 
 ## Adding a rule
 
 1. Check the change against the [safety rules](README.md#safety-by-design).
-2. Add a variant to `RuleId` in `crates/seethru-core/src/report.rs` and give it a kebab-case ID in `as_str`. Users write this ID in `seethru.toml`, so never change it after a release.
+2. Add a variant to `RuleId` in `crates/seethru-core/src/report.rs`, give it a kebab-case ID in `as_str` and list its CWE numbers in `cwe`. Users write this ID in `seethru.toml`, so never change it after a release.
 3. Write the title and the explanation in English and Korean in `crates/seethru-analyzer/src/rules.rs`, and add them to `every_text()` in its tests. The test checks that both languages are there and that they name the same things in backticks.
-4. Raise the finding from the analyzer with `Graph::add_finding`. Always give it a location so that `path` in `[[accept]]` can match it.
+4. Raise the finding from the analyzer with `Graph::add_finding`. Always give it a location so that `path` in `[[accept]]` can match it, a confidence (`certain` for a fact read directly, `likely` for an interpreted path, `review` when a person has to check) and the evidence steps that lead from the code to the node.
 5. Pick the severity by what an attacker could do. Use `Info` only for what cannot be confirmed from the repository alone.
 6. Write the fix prompt in English and Korean in `crates/seethru-fix/src/lib.rs`.
 7. Add unit tests next to the code and an integration test in `crates/seethru-analyzer/tests`. Add or extend a fixture when the rule needs a whole project.

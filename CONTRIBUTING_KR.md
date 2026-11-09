@@ -72,9 +72,9 @@ Rust 의존성을 바꿨다면 `cargo deny check`도 실행하세요.
 ## 규칙 추가하기
 
 1. 변경 사항이 [안전 설계](README_KR.md#안전-설계)를 지키는지 확인합니다.
-2. `crates/seethru-core/src/report.rs`의 `RuleId`에 항목을 추가하고, `as_str`에 kebab-case ID를 정합니다. 사용자가 이 ID를 `seethru.toml`에 적기 때문에, 한 번 릴리스한 ID는 바꾸지 않습니다.
+2. `crates/seethru-core/src/report.rs`의 `RuleId`에 항목을 추가하고, `as_str`에 kebab-case ID를 정하고, `cwe`에 관련 CWE 번호를 적습니다. 사용자가 이 ID를 `seethru.toml`에 적기 때문에, 한 번 릴리스한 ID는 바꾸지 않습니다.
 3. `crates/seethru-analyzer/src/rules.rs`에 제목과 설명을 영어와 한국어로 쓰고, 테스트의 `every_text()`에 추가합니다. 이 테스트는 두 언어가 모두 있는지, 백틱으로 감싼 이름이 같은지 확인합니다.
-4. 분석기에서 `Graph::add_finding`으로 탐지를 만듭니다. `[[accept]]`의 `path`가 맞출 수 있도록 위치를 꼭 넣습니다.
+4. 분석기에서 `Graph::add_finding`으로 탐지를 만듭니다. `[[accept]]`의 `path`가 맞출 수 있도록 위치를 꼭 넣고, 확실도(`certain`은 직접 읽은 사실, `likely`는 해석한 경로, `review`는 사람이 확인해야 하는 것)와 코드에서 노드까지 이어지는 근거 단계도 함께 넣습니다.
 5. 심각도는 공격자가 할 수 있는 일을 기준으로 정합니다. `Info`는 저장소만으로 확인할 수 없는 경우에만 씁니다.
 6. `crates/seethru-fix/src/lib.rs`에 수정 프롬프트를 영어와 한국어로 씁니다.
 7. 코드 옆에 단위 테스트를, `crates/seethru-analyzer/tests`에 통합 테스트를 추가합니다. 프로젝트 전체가 필요한 규칙이면 픽스처를 추가하거나 늘립니다.
