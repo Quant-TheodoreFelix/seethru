@@ -270,5 +270,5 @@ pub struct Finding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fix_prompt: Option<String>,
+    pub fix_prompt: Option<LocalizedText>,
 }

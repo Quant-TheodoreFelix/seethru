@@ -1,18 +1,18 @@
 use std::path::PathBuf;
 
 use seethru_core::{
-    Finding, LocalizedText, Location, MaskedSecret, Node, NodeId, NodeKind, RuleId, SCHEMA_VERSION,
-    ScanReport, SecretKind, Severity, Summary, TargetInfo, ToolInfo,
+    Finding, Lang, LocalizedText, Location, MaskedSecret, Node, NodeId, NodeKind, RuleId,
+    SCHEMA_VERSION, ScanReport, SecretKind, Severity, Summary, TargetInfo, ToolInfo,
 };
 
-use super::{CLOSING, attach_fix_prompts, fix_prompt};
+use super::{CLOSING_EN, CLOSING_KO, attach_fix_prompts, fix_prompt};
 
 fn fixture_report() -> Option<ScanReport> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/supabase-vite");
     seethru_analyzer::scan(&root).ok()
 }
 
-fn prompt_for(report: &ScanReport, rule: RuleId) -> String {
+fn prompt_for(report: &ScanReport, rule: RuleId) -> LocalizedText {
     report
         .findings
         .iter()
@@ -21,22 +21,30 @@ fn prompt_for(report: &ScanReport, rule: RuleId) -> String {
         .unwrap_or_default()
 }
 
+fn has_hangul(text: &str) -> bool {
+    text.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c))
+}
+
 #[test]
-fn every_finding_gets_a_prompt_with_its_location() {
+fn every_finding_gets_a_prompt_in_both_languages_with_its_location() {
     let Some(mut report) = fixture_report() else {
         unreachable!("fixture scan failed")
     };
     attach_fix_prompts(&mut report);
     assert!(!report.findings.is_empty());
     for finding in &report.findings {
-        let prompt = finding.fix_prompt.as_deref().unwrap_or_default();
+        let prompt = finding.fix_prompt.clone().unwrap_or_default();
         let path = finding
             .location
             .as_ref()
             .map(|l| l.path.as_str())
             .unwrap_or_default();
-        assert!(prompt.contains(path), "{prompt}");
-        assert!(prompt.ends_with(CLOSING), "{prompt}");
+        assert!(prompt.en.contains(path), "{prompt:?}");
+        assert!(prompt.ko.contains(path), "{prompt:?}");
+        assert!(prompt.en.ends_with(CLOSING_EN), "{prompt:?}");
+        assert!(prompt.ko.ends_with(CLOSING_KO), "{prompt:?}");
+        assert!(!has_hangul(&prompt.en), "{prompt:?}");
+        assert!(!prompt.ko.contains('\u{2014}'), "{prompt:?}");
     }
 }
 
@@ -47,11 +55,13 @@ fn rls_prompt_names_the_table_and_the_code_that_uses_it() {
     };
     attach_fix_prompts(&mut report);
     let prompt = prompt_for(&report, RuleId::SupabaseRlsDisabled);
-    assert!(
-        prompt.contains("alter table public.todos enable row level security;"),
-        "{prompt}"
-    );
-    assert!(prompt.contains("`src/pages/Todos.tsx`"), "{prompt}");
+    for text in [&prompt.en, &prompt.ko] {
+        assert!(
+            text.contains("alter table public.todos enable row level security;"),
+            "{text}"
+        );
+        assert!(text.contains("`src/pages/Todos.tsx`"), "{text}");
+    }
 }
 
 #[test]
@@ -61,15 +71,18 @@ fn policy_and_service_role_prompts_point_at_the_right_places() {
     };
     attach_fix_prompts(&mut report);
     let service = prompt_for(&report, RuleId::SupabaseServiceRoleInBrowser);
-    assert!(
-        service.contains("`VITE_SUPABASE_SERVICE_ROLE_KEY`"),
-        "{service}"
-    );
-    assert!(service.contains("`src/lib/admin.ts`"), "{service}");
+    for text in [&service.en, &service.ko] {
+        assert!(text.contains("`VITE_SUPABASE_SERVICE_ROLE_KEY`"), "{text}");
+        assert!(text.contains("`src/lib/admin.ts`"), "{text}");
+    }
     let policy = prompt_for(&report, RuleId::SupabasePolicyUnrestricted);
     assert!(
-        policy.contains("The `Signed in users can edit posts` policy on the Supabase `posts` table (`update` for authenticated)"),
-        "{policy}"
+        policy.en.contains("The `Signed in users can edit posts` policy on the Supabase `posts` table (`update` for authenticated)"),
+        "{policy:?}"
+    );
+    assert!(
+        policy.ko.contains("Supabase `posts` 테이블의 `Signed in users can edit posts` 정책(`update`, 대상 authenticated)"),
+        "{policy:?}"
     );
 }
 
@@ -128,13 +141,18 @@ fn secret_report(label: &str) -> (ScanReport, String) {
 #[test]
 fn secret_prompts_never_carry_the_value_and_strip_hostile_names() {
     let (report, masked) = secret_report("label");
-    let prompt = report
-        .findings
-        .first()
-        .map(|finding| fix_prompt(&report, finding))
-        .unwrap_or_default();
-    assert!(prompt.contains("`src/payment.ts:3`"), "{prompt}");
-    assert!(!prompt.contains(&masked));
-    assert!(!prompt.contains("sk_live_"));
-    assert!(prompt.contains("a Stripe secret key"));
+    for (lang, name) in [
+        (Lang::En, "a Stripe secret key"),
+        (Lang::Ko, "Stripe 비밀 키"),
+    ] {
+        let prompt = report
+            .findings
+            .first()
+            .map(|finding| fix_prompt(&report, finding, lang))
+            .unwrap_or_default();
+        assert!(prompt.contains("`src/payment.ts:3`"), "{prompt}");
+        assert!(!prompt.contains(&masked));
+        assert!(!prompt.contains("sk_live_"));
+        assert!(prompt.contains(name), "{prompt}");
+    }
 }

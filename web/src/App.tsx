@@ -297,7 +297,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                     {selected.location.path}:{selected.location.line}
                   </p>
                 ) : null}
-                {selected.fixPrompt ? <FixPrompt key={selected.id} prompt={selected.fixPrompt} /> : null}
+                {selected.fixPrompt ? <FixPrompt key={selected.id} prompt={selected.fixPrompt.en} /> : null}
               </motion.section>
             ) : null}
           </AnimatePresence>

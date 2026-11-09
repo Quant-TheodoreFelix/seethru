@@ -51,9 +51,13 @@
           "$ref": "#/$defs/LocalizedText"
         },
         "fixPrompt": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocalizedText"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "id": {

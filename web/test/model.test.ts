@@ -26,6 +26,7 @@ function validReport(): Record<string, unknown> {
         title: { en: "t", ko: "제목" },
         explanation: { en: "e", ko: "설명" },
         node: "table:public.todos",
+        fixPrompt: { en: "p", ko: "프롬프트" },
       },
     ],
   };
@@ -47,6 +48,7 @@ test("rejects unknown fields", () => {
 test("reads finding texts in both languages and rejects anything else", () => {
   const report = parseScanReport(validReport());
   assert.deepEqual(report.findings[0]?.title, { en: "t", ko: "제목" });
+  assert.deepEqual(report.findings[0]?.fixPrompt, { en: "p", ko: "프롬프트" });
 
   const finding = (validReport().findings as Record<string, unknown>[])[0];
   for (const title of ["t", { en: "t" }, { en: "t", ko: "제목", ja: "x" }, { en: "t", ko: 1 }]) {
@@ -54,6 +56,9 @@ test("reads finding texts in both languages and rejects anything else", () => {
     broken.findings = [{ ...finding, title }];
     assert.throws(() => parseScanReport(broken), ReportError);
   }
+  const plainPrompt = validReport();
+  plainPrompt.findings = [{ ...finding, fixPrompt: "p" }];
+  assert.throws(() => parseScanReport(plainPrompt), /fixPrompt/);
 });
 
 test("rejects edges and findings that point at missing nodes", () => {

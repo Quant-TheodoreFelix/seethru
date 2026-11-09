@@ -74,7 +74,7 @@ export interface Finding {
   explanation: LocalizedText;
   node: string;
   location?: Location;
-  fixPrompt?: string;
+  fixPrompt?: LocalizedText;
 }
 
 export const SCHEMA_VERSION = 2;
@@ -232,7 +232,7 @@ export function parseScanReport(input: unknown): ScanReport {
       node: known(o.node, `${path}.node`),
     };
     if (o.location !== undefined) finding.location = location(o.location, `${path}.location`);
-    if (o.fixPrompt !== undefined) finding.fixPrompt = text(o.fixPrompt, `${path}.fixPrompt`);
+    if (o.fixPrompt !== undefined) finding.fixPrompt = localized(o.fixPrompt, `${path}.fixPrompt`);
     return finding;
   });
 
