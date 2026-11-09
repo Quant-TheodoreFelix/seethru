@@ -1,16 +1,18 @@
+mod buckets;
+mod condition;
+mod emit;
+mod functions;
+mod grants;
 mod lexer;
+mod views;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use seethru_core::{
-    AccessRuleDetail, Basis, Confidence, DataStoreDetail, EdgeKind, Location, Node, NodeId,
-    NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
-};
+use seethru_core::{BucketVisibility, Location, PolicyCommand, RlsStatus};
 
-use crate::classify::FileRole;
-use crate::graph::{Graph, Verdict, file_location, file_step, step};
-use crate::rules;
+use condition::condition;
 use lexer::{Kind, Token, statements, tokenize};
+use views::ViewForm;
 
 const DEFAULT_SCHEMA: &str = "public";
 const EXPOSED_SCHEMAS: &[&str] = &["public"];
@@ -32,6 +34,9 @@ const MANAGED_SCHEMAS: &[&str] = &[
 ];
 const ANONYMOUS_ROLES: &[&str] = &["public", "anon"];
 const SIGNED_IN_ROLES: &[&str] = &["authenticated"];
+const ADMIN_ROLES: &[&str] = &["postgres", "supabase_admin"];
+const SESSION_ROLES: &[&str] = &["current_user", "session_user", "current_role"];
+const CALLER_FUNCTIONS: &[&str] = &["uid", "jwt", "role", "email"];
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct TableKey {
@@ -46,14 +51,114 @@ struct Table {
     rls_changed_at: Option<Location>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Roles(BTreeSet<String>);
+
+impl Roles {
+    fn of(roles: &[&str]) -> Self {
+        Self(roles.iter().map(|role| (*role).to_owned()).collect())
+    }
+
+    fn grant(&mut self, role: &str) {
+        self.0.insert(role.to_owned());
+    }
+
+    fn revoke(&mut self, role: &str) {
+        self.0.remove(role);
+    }
+
+    fn anyone(&self) -> bool {
+        ANONYMOUS_ROLES.iter().any(|role| self.0.contains(*role))
+    }
+
+    fn signed_in(&self) -> bool {
+        self.0.contains("public") || SIGNED_IN_ROLES.iter().any(|role| self.0.contains(*role))
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Condition {
+    open: bool,
+    signed_in: bool,
+    buckets: BTreeSet<String>,
+}
+
 #[derive(Debug, Clone)]
 struct Policy {
     command: PolicyCommand,
     roles: Vec<String>,
     permissive: bool,
-    using_true: bool,
-    check_true: bool,
+    using: Condition,
+    check: Condition,
     location: Location,
+}
+
+#[derive(Debug, Clone)]
+struct View {
+    materialized: bool,
+    security_invoker: bool,
+    owner_is_admin: bool,
+    checks_caller: bool,
+    reads: BTreeSet<TableKey>,
+    readers: Roles,
+    defined_at: Location,
+}
+
+#[derive(Debug, Clone)]
+struct Function {
+    security_definer: bool,
+    security_at: Option<Location>,
+    returns_trigger: bool,
+    returns_boolean: bool,
+    owner_is_admin: bool,
+    checks_caller: bool,
+    calls: BTreeSet<TableKey>,
+    executors: Roles,
+    defined_at: Location,
+}
+
+#[derive(Debug, Clone)]
+struct Bucket {
+    visibility: BucketVisibility,
+    defined_at: Option<Location>,
+}
+
+#[derive(Debug, Clone)]
+struct Defaults {
+    executors: Roles,
+    schema_executors: BTreeMap<String, Roles>,
+    readers: Roles,
+    schema_readers: BTreeMap<String, Roles>,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        let supabase = Roles::of(&["anon", "authenticated", "service_role"]);
+        Self {
+            executors: Roles::of(&["public"]),
+            schema_executors: BTreeMap::from([(DEFAULT_SCHEMA.to_owned(), supabase.clone())]),
+            readers: Roles::default(),
+            schema_readers: BTreeMap::from([(DEFAULT_SCHEMA.to_owned(), supabase)]),
+        }
+    }
+}
+
+impl Defaults {
+    fn executors_in(&self, schema: &str) -> Roles {
+        let mut roles = self.executors.clone();
+        if let Some(extra) = self.schema_executors.get(schema) {
+            roles.0.extend(extra.0.iter().cloned());
+        }
+        roles
+    }
+
+    fn readers_in(&self, schema: &str) -> Roles {
+        let mut roles = self.readers.clone();
+        if let Some(extra) = self.schema_readers.get(schema) {
+            roles.0.extend(extra.0.iter().cloned());
+        }
+        roles
+    }
 }
 
 #[derive(Default)]
@@ -61,50 +166,76 @@ pub(crate) struct Migrations {
     tables: BTreeMap<TableKey, Table>,
     policies: BTreeMap<(TableKey, String), Policy>,
     defined_in: BTreeMap<TableKey, String>,
-    views: BTreeSet<TableKey>,
+    views: BTreeMap<TableKey, View>,
+    functions: BTreeMap<TableKey, Function>,
+    buckets: BTreeMap<String, Bucket>,
+    defaults: Defaults,
 }
 
 impl Migrations {
     pub(crate) fn apply_file(&mut self, rel_path: &str, source: &str) {
         let tokens = tokenize(source);
         for statement in statements(&tokens) {
-            let location = |token: &Token| Location {
-                path: rel_path.to_owned(),
-                line: token.line,
-                column: token.column,
-            };
+            let location = |token: &Token| locate(rel_path, token);
             let Some(first) = statement.first() else {
                 continue;
             };
             let at = location(first);
             let mut cursor = Cursor::new(statement);
             if cursor.eat("create") {
-                cursor.eat_seq(&["or", "replace"]);
-                cursor.eat("temporary");
-                cursor.eat("temp");
+                let replace = cursor.eat_seq(&["or", "replace"]);
+                let temporary = cursor.eat("temporary") || cursor.eat("temp");
                 cursor.eat("recursive");
-                cursor.eat("materialized");
+                let materialized = cursor.eat("materialized");
                 if cursor.eat("table") || cursor.eat_seq(&["unlogged", "table"]) {
                     if let Some(key) = cursor.table_name_after_if_not_exists() {
                         self.create_table(key, at, rel_path);
                     }
                 } else if cursor.eat("view") {
-                    if let Some(key) = cursor.table_name_after_if_not_exists() {
-                        self.views.insert(key);
-                    }
+                    self.create_view(
+                        &mut cursor,
+                        at,
+                        ViewForm {
+                            replace,
+                            materialized,
+                            temporary,
+                        },
+                    );
+                } else if cursor.eat("function") {
+                    self.create_function(&mut cursor, at, rel_path);
                 } else if cursor.eat("policy") {
                     self.create_policy(&mut cursor, at);
                 }
             } else if cursor.eat("alter") {
                 if cursor.eat("table") {
                     self.alter_table(&mut cursor, &at);
+                } else if cursor.eat("view") || cursor.eat_seq(&["materialized", "view"]) {
+                    self.alter_view(&mut cursor);
+                } else if cursor.eat("function") {
+                    self.alter_function(&mut cursor, rel_path);
+                } else if cursor.eat_seq(&["default", "privileges"]) {
+                    self.alter_default_privileges(&mut cursor);
                 }
             } else if cursor.eat("drop") {
                 if cursor.eat("table") {
                     self.drop_tables(&mut cursor);
                 } else if cursor.eat("policy") {
                     self.drop_policy(&mut cursor);
+                } else if cursor.eat("view") || cursor.eat_seq(&["materialized", "view"]) {
+                    self.drop_views(&mut cursor);
+                } else if cursor.eat("function") {
+                    self.drop_functions(&mut cursor);
                 }
+            } else if cursor.eat("grant") {
+                self.grant_or_revoke(&mut cursor, true);
+            } else if cursor.eat("revoke") {
+                self.grant_or_revoke(&mut cursor, false);
+            } else if cursor.eat("insert") {
+                self.insert_buckets(&mut cursor, at);
+            } else if cursor.eat("update") {
+                self.update_buckets(&mut cursor);
+            } else if cursor.eat("delete") {
+                self.delete_buckets(&mut cursor);
             }
         }
     }
@@ -143,6 +274,14 @@ impl Migrations {
             return;
         }
         let rest = cursor.rest();
+        for window in rest.windows(3) {
+            if window[0].is_word("owner")
+                && window[1].is_word("to")
+                && let Some(view) = self.views.get_mut(&key)
+            {
+                view.owner_is_admin = is_admin_role(&window[2].text);
+            }
+        }
         for window in rest.windows(4) {
             let toggled = if window[0].is_word("enable") {
                 Some(RlsStatus::Enabled)
@@ -169,6 +308,9 @@ impl Migrations {
         };
         if let Some(table) = self.tables.remove(key) {
             self.tables.insert(new_key.clone(), table);
+        }
+        if let Some(view) = self.views.remove(key) {
+            self.views.insert(new_key.clone(), view);
         }
         if let Some(path) = self.defined_in.remove(key) {
             self.defined_in.insert(new_key.clone(), path);
@@ -225,8 +367,8 @@ impl Migrations {
             command: PolicyCommand::All,
             roles: vec!["public".to_owned()],
             permissive: true,
-            using_true: false,
-            check_true: false,
+            using: Condition::default(),
+            check: Condition::default(),
             location: at,
         };
         if cursor.eat("as") {
@@ -254,200 +396,70 @@ impl Migrations {
                 policy.roles = roles;
             }
         }
+        let storage = key.schema == "storage" && key.name == "objects";
         if cursor.eat("using") {
-            policy.using_true = cursor.parenthesized().is_some_and(always_true);
+            policy.using = cursor
+                .parenthesized()
+                .map(|tokens| condition(tokens, storage))
+                .unwrap_or_default();
         }
         if cursor.eat_seq(&["with", "check"]) {
-            policy.check_true = cursor.parenthesized().is_some_and(always_true);
+            policy.check = cursor
+                .parenthesized()
+                .map(|tokens| condition(tokens, storage))
+                .unwrap_or_default();
         }
         self.table_mut(key.clone());
         self.policies.insert((key, name), policy);
     }
 
     pub(crate) fn is_view(&self, schema: &str, name: &str) -> bool {
-        self.views.contains(&TableKey {
+        self.views.contains_key(&TableKey {
             schema: schema.to_owned(),
             name: name.to_owned(),
         })
     }
 
-    pub(crate) fn emit(self, graph: &mut Graph) {
-        for (key, table) in &self.tables {
-            if MANAGED_SCHEMAS.contains(&key.schema.as_str()) {
-                continue;
-            }
-            let table_id = table_id(key);
-            let label = table_label(key);
-            graph.add_node(Node {
-                id: table_id.clone(),
-                label: label.clone(),
-                kind: NodeKind::DataStore {
-                    detail: Some(DataStoreDetail::PostgresTable {
-                        schema: key.schema.clone(),
-                        rls: table.rls,
-                    }),
-                },
-                zone: Zone::Database,
-                location: table
-                    .defined_at
-                    .clone()
-                    .or_else(|| table.rls_changed_at.clone()),
-            });
-            let mut evidence = Vec::new();
-            if let Some(path) = self.defined_in.get(key) {
-                let file_id = graph.add_file(path, FileRole::Migration, Basis::Path);
-                graph.add_edge(file_id, table_id.clone(), EdgeKind::Defines);
-                evidence.push(file_step(path, None, file_location(path)));
-            }
-            let exposed = EXPOSED_SCHEMAS.contains(&key.schema.as_str());
-            if exposed && table.rls == RlsStatus::Disabled {
-                let text = rules::rls_disabled(&label);
-                let at = table
-                    .rls_changed_at
-                    .clone()
-                    .or_else(|| table.defined_at.clone());
-                evidence.push(step(
-                    &label,
-                    evidence.first().map(|_| EdgeKind::Defines),
-                    Some(table_id.clone()),
-                    at.clone(),
-                ));
-                graph.add_finding(
-                    Verdict {
-                        rule: RuleId::SupabaseRlsDisabled,
-                        severity: Severity::Critical,
-                        confidence: Confidence::Certain,
-                        from_build: false,
-                    },
-                    text,
-                    table_id,
-                    at,
-                    evidence,
-                );
-            }
-        }
-
-        for ((key, name), policy) in &self.policies {
-            if MANAGED_SCHEMAS.contains(&key.schema.as_str()) {
-                continue;
-            }
-            let reach = policy_reach(policy);
-            let policy_id = NodeId::new(format!("policy:{}.{}/{}", key.schema, key.name, name));
-            graph.add_node(Node {
-                id: policy_id.clone(),
-                label: name.clone(),
-                kind: NodeKind::AccessRule {
-                    scope: if policy_open(policy) {
-                        RuleScope::Open
-                    } else {
-                        RuleScope::Conditional
-                    },
-                    strength: None,
-                    detail: Some(AccessRuleDetail::PostgresPolicy {
-                        command: policy.command,
-                        roles: policy.roles.clone(),
-                    }),
-                },
-                zone: Zone::Database,
-                location: Some(policy.location.clone()),
-            });
-            graph.add_edge(table_id(key), policy_id.clone(), EdgeKind::GuardedBy);
-
-            let exposed = EXPOSED_SCHEMAS.contains(&key.schema.as_str());
-            if let (true, Some(reach)) = (exposed, reach) {
-                let severity = policy_severity(reach, policy.command);
-                let text = rules::policy_unrestricted(
-                    &table_label(key),
-                    name,
-                    reach == Reach::Anyone,
-                    policy.command,
-                );
-                let mut evidence = Vec::new();
-                if let Some(table) = self.tables.get(key) {
-                    evidence.push(step(
-                        &table_label(key),
-                        None,
-                        Some(table_id(key)),
-                        table
-                            .defined_at
-                            .clone()
-                            .or_else(|| table.rls_changed_at.clone()),
-                    ));
-                }
-                evidence.push(step(
-                    name,
-                    evidence.first().map(|_| EdgeKind::GuardedBy),
-                    Some(policy_id.clone()),
-                    Some(policy.location.clone()),
-                ));
-                graph.add_finding(
-                    Verdict {
-                        rule: RuleId::SupabasePolicyUnrestricted,
-                        severity,
-                        confidence: Confidence::Certain,
-                        from_build: false,
-                    },
-                    text,
-                    policy_id,
-                    Some(policy.location.clone()),
-                    evidence,
-                );
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reach {
-    Anyone,
-    SignedIn,
-}
-
-fn policy_open(policy: &Policy) -> bool {
-    match policy.command {
-        PolicyCommand::Insert => policy.check_true,
-        PolicyCommand::Select
-        | PolicyCommand::Update
-        | PolicyCommand::Delete
-        | PolicyCommand::All => policy.using_true,
-    }
-}
-
-fn policy_reach(policy: &Policy) -> Option<Reach> {
-    if !policy.permissive || !policy_open(policy) {
-        return None;
-    }
-    let has = |roles: &[&str]| {
-        policy
-            .roles
-            .iter()
-            .any(|role| roles.contains(&role.as_str()))
-    };
-    if has(ANONYMOUS_ROLES) {
-        Some(Reach::Anyone)
-    } else if has(SIGNED_IN_ROLES) {
-        Some(Reach::SignedIn)
-    } else {
-        None
-    }
-}
-
-fn policy_severity(reach: Reach, command: PolicyCommand) -> Severity {
-    match (reach, command) {
-        (Reach::Anyone, PolicyCommand::All | PolicyCommand::Update | PolicyCommand::Delete) => {
-            Severity::Critical
-        }
-        (Reach::Anyone, PolicyCommand::Insert) => Severity::High,
-        (Reach::Anyone, PolicyCommand::Select) => Severity::Medium,
-        (Reach::SignedIn, PolicyCommand::All | PolicyCommand::Update | PolicyCommand::Delete) => {
-            Severity::High
-        }
-        (Reach::SignedIn, PolicyCommand::Insert) => Severity::Medium,
-        (Reach::SignedIn, PolicyCommand::Select) => Severity::Low,
+    fn function_checks_caller(&self, key: &TableKey) -> bool {
+        let Some(function) = self.functions.get(key) else {
+            return false;
+        };
+        function.checks_caller
+            || function.calls.iter().any(|callee| {
+                self.functions
+                    .get(callee)
+                    .is_some_and(|callee| callee.checks_caller)
+            })
     }
 }
 
 fn always_true(tokens: &[Token]) -> bool {
+    match strip_parens(tokens) {
+        [only] => only.is_word("true"),
+        [a, eq, b] => {
+            a.kind == Kind::Number && eq.is_punct('=') && b.kind == Kind::Number && a.text == b.text
+        }
+        _ => false,
+    }
+}
+
+fn locate(rel_path: &str, token: &Token) -> Location {
+    Location {
+        path: rel_path.to_owned(),
+        line: token.line,
+        column: token.column,
+    }
+}
+
+fn is_admin_role(role: &str) -> bool {
+    ADMIN_ROLES.contains(&role) || SESSION_ROLES.contains(&role)
+}
+
+fn is_name(token: &Token) -> bool {
+    matches!(token.kind, Kind::Word | Kind::QuotedIdent)
+}
+
+fn strip_parens(tokens: &[Token]) -> &[Token] {
     let mut inner = tokens;
     while inner.len() >= 2
         && inner.first().is_some_and(|t| t.is_punct('('))
@@ -456,13 +468,71 @@ fn always_true(tokens: &[Token]) -> bool {
     {
         inner = &inner[1..inner.len() - 1];
     }
-    match inner {
-        [only] => only.is_word("true"),
-        [a, eq, b] => {
-            a.kind == Kind::Number && eq.is_punct('=') && b.kind == Kind::Number && a.text == b.text
+    inner
+}
+
+fn top_positions(tokens: &[Token], pred: impl Fn(&Token) -> bool) -> Vec<usize> {
+    let mut depth = 0usize;
+    let mut found = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.is_punct('(') || token.is_punct('[') {
+            depth += 1;
+        } else if token.is_punct(')') || token.is_punct(']') {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && pred(token) {
+            found.push(index);
         }
-        _ => false,
     }
+    found
+}
+
+fn split_top(tokens: &[Token], pred: impl Fn(&Token) -> bool) -> Vec<&[Token]> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for index in top_positions(tokens, pred) {
+        parts.push(&tokens[start..index]);
+        start = index + 1;
+    }
+    parts.push(&tokens[start..]);
+    parts
+}
+
+fn is_cast_tail(tokens: &[Token]) -> bool {
+    tokens.is_empty()
+        || (tokens.len() >= 3
+            && tokens[0].is_punct(':')
+            && tokens[1].is_punct(':')
+            && tokens[2..].iter().all(is_name))
+}
+
+fn literal_str(tokens: &[Token]) -> Option<&str> {
+    let tokens = strip_parens(tokens);
+    let first = tokens.first()?;
+    (first.kind == Kind::Str && is_cast_tail(&tokens[1..])).then_some(first.text.as_str())
+}
+
+fn single_equals(tokens: &[Token]) -> Option<(&[Token], &[Token])> {
+    let operators = top_positions(tokens, |t| {
+        t.is_punct('=') || t.is_punct('<') || t.is_punct('>') || t.is_punct('!')
+    });
+    let [index] = operators.as_slice() else {
+        return None;
+    };
+    tokens[*index]
+        .is_punct('=')
+        .then(|| (&tokens[..*index], &tokens[*index + 1..]))
+}
+
+fn checks_caller(tokens: &[Token]) -> bool {
+    tokens
+        .iter()
+        .any(|t| t.kind == Kind::Str && t.text.contains("request.jwt"))
+        || tokens.windows(3).any(|w| {
+            w[0].is_word("auth")
+                && w[1].is_punct('.')
+                && w[2].kind == Kind::Word
+                && CALLER_FUNCTIONS.contains(&w[2].text.as_str())
+        })
 }
 
 fn matching_close(tokens: &[Token]) -> Option<usize> {
@@ -478,18 +548,6 @@ fn matching_close(tokens: &[Token]) -> Option<usize> {
         }
     }
     None
-}
-
-fn table_id(key: &TableKey) -> NodeId {
-    NodeId::new(format!("table:{}.{}", key.schema, key.name))
-}
-
-fn table_label(key: &TableKey) -> String {
-    if key.schema == DEFAULT_SCHEMA {
-        key.name.clone()
-    } else {
-        format!("{}.{}", key.schema, key.name)
-    }
 }
 
 struct Cursor<'a> {
@@ -513,6 +571,21 @@ impl<'a> Cursor<'a> {
         } else {
             false
         }
+    }
+
+    fn peek_is_punct(&self, c: char) -> bool {
+        self.peek().is_some_and(|token| token.is_punct(c))
+    }
+
+    fn names(&mut self) -> Vec<String> {
+        let mut names = Vec::new();
+        while let Some(name) = self.identifier() {
+            names.push(name);
+            if !self.eat_punct(',') {
+                break;
+            }
+        }
+        names
     }
 
     fn eat_punct(&mut self, c: char) -> bool {
@@ -595,3 +668,6 @@ impl<'a> Cursor<'a> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod parse_tests;
