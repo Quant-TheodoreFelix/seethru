@@ -213,6 +213,10 @@ code {
   letter-spacing: 0.04em;
 }
 
+.switch button[lang] {
+  letter-spacing: 0.16em;
+}
+
 .error {
   margin: 0;
   padding: 10px 14px;
