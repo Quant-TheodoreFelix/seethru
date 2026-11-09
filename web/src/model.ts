@@ -1,17 +1,35 @@
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-const FILE_ROLES = [
-  "browserCode",
-  "serverCode",
-  "edgeFunction",
-  "unknownCode",
-  "migration",
-  "envFile",
-  "buildOutput",
-  "other",
-] as const;
-export type FileRole = (typeof FILE_ROLES)[number];
+export const CONFIDENCES = ["certain", "likely", "review"] as const;
+export type Confidence = (typeof CONFIDENCES)[number];
+
+export const ZONES = ["client", "server", "database", "device", "buildTime", "thirdParty", "unknown"] as const;
+export type Zone = (typeof ZONES)[number];
+
+const RUNTIMES = ["browser", "server", "edge", "mobile", "native", "firmware", "database", "build", "unknown"] as const;
+export type Runtime = (typeof RUNTIMES)[number];
+
+const ARTIFACTS = ["source", "buildOutput", "migration", "config", "binary", "other"] as const;
+export type Artifact = (typeof ARTIFACTS)[number];
+
+const UNITS = ["file", "function", "image"] as const;
+export type Unit = (typeof UNITS)[number];
+
+const BASES = ["path", "directive", "imports", "buildOutput", "engine", "dynamic"] as const;
+export type Basis = (typeof BASES)[number];
+
+const CHANNELS = ["httpRoute", "serverAction", "rpc", "cli", "ipc", "queue", "schedule", "serial", "ble", "socket"] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+const EXPOSURES = ["public", "authenticated", "internal", "unknown"] as const;
+export type Exposure = (typeof EXPOSURES)[number];
+
+const RULE_SCOPES = ["open", "conditional", "unknown"] as const;
+export type RuleScope = (typeof RULE_SCOPES)[number];
+
+const STRENGTHS = ["verified", "weak", "unknown"] as const;
+export type Strength = (typeof STRENGTHS)[number];
 
 const RLS_STATUSES = ["enabled", "disabled", "unknown"] as const;
 export type RlsStatus = (typeof RLS_STATUSES)[number];
@@ -32,8 +50,32 @@ const SECRET_KINDS = [
 ] as const;
 export type SecretKind = (typeof SECRET_KINDS)[number];
 
-export const EDGE_KINDS = ["defines", "guardedBy", "queries", "writes", "reads", "contains"] as const;
+export const EDGE_KINDS = [
+  "imports",
+  "calls",
+  "builtFrom",
+  "invokes",
+  "reads",
+  "writes",
+  "usesConfig",
+  "defines",
+  "guardedBy",
+  "actsAs",
+  "appliesTo",
+  "contains",
+  "unlocks",
+  "connectsTo",
+] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
+
+const ECOSYSTEMS = ["next", "vite", "supabase"] as const;
+export type Ecosystem = (typeof ECOSYSTEMS)[number];
+
+const INPUT_KINDS = ["source"] as const;
+export type InputKind = (typeof INPUT_KINDS)[number];
+
+export const LIMITATION_CODES = ["buildOutputNotRead", "dashboardPoliciesUnseen"] as const;
+export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
   path: string;
@@ -41,17 +83,26 @@ export interface Location {
   column: number;
 }
 
+export type DataStoreDetail = { type: "postgresTable"; schema: string; rls: RlsStatus };
+export type AccessRuleDetail = { type: "postgresPolicy"; command: PolicyCommand; roles: string[] };
+export type ConfigDetail = { type: "envVar"; exposedToClient: boolean };
+export type CredentialDetail = { type: "secret"; secretKind: SecretKind; masked: string };
+
 export type NodeKind =
-  | { type: "file"; role: FileRole }
-  | { type: "table"; schema: string; rls: RlsStatus }
-  | { type: "policy"; command: PolicyCommand; roles: string[]; unrestricted: boolean }
-  | { type: "envVar"; exposedToBrowser: boolean }
-  | { type: "secret"; secretKind: SecretKind; masked: string };
+  | { type: "component"; runtime: Runtime; artifact: Artifact; unit: Unit; basis: Basis }
+  | { type: "entryPoint"; channel: Channel; exposure: Exposure }
+  | { type: "dataStore"; detail?: DataStoreDetail }
+  | { type: "accessRule"; scope: RuleScope; strength?: Strength; detail?: AccessRuleDetail }
+  | { type: "principal" }
+  | { type: "credential"; detail: CredentialDetail }
+  | { type: "config"; detail?: ConfigDetail }
+  | { type: "service" };
 
 export interface ReportNode {
   id: string;
   label: string;
   kind: NodeKind;
+  zone: Zone;
   location?: Location;
 }
 
@@ -70,19 +121,42 @@ export interface Acceptance {
   reason: string;
 }
 
+export interface EvidenceStep {
+  label: string;
+  via?: EdgeKind;
+  node?: string;
+  location?: Location;
+}
+
+export interface Origin {
+  engine: string;
+  inputs: InputKind[];
+  rule?: string;
+}
+
 export interface Finding {
   id: string;
   rule: string;
   severity: Severity;
+  confidence: Confidence;
   title: LocalizedText;
   explanation: LocalizedText;
   node: string;
   location?: Location;
+  evidence: EvidenceStep[];
+  origin: Origin;
+  cwe: number[];
+  proof?: string;
   fixPrompt?: LocalizedText;
   accepted?: Acceptance;
 }
 
-export const SCHEMA_VERSION = 3;
+export interface Limitation {
+  code: LimitationCode;
+  text: LocalizedText;
+}
+
+export const SCHEMA_VERSION = 4;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -94,6 +168,9 @@ export interface ScanReport {
     filesExcluded: number;
     truncated: boolean;
     configFile?: string;
+    ecosystems: Ecosystem[];
+    inputs: { type: InputKind }[];
+    limitations: Limitation[];
   };
   summary: Record<Severity, number> & { accepted: number };
   nodes: ReportNode[];
@@ -105,6 +182,10 @@ const MAX_NODES = 5000;
 const MAX_EDGES = 20000;
 const MAX_FINDINGS = 5000;
 const MAX_TEXT = 20000;
+const MAX_ROLES = 64;
+const MAX_STEPS = 64;
+const MAX_CWE = 16;
+const MAX_LIST = 64;
 
 export class ReportError extends Error {
   override name = "ReportError";
@@ -166,38 +247,90 @@ function location(value: unknown, path: string): Location {
   return { path: text(o.path, `${path}.path`), line: count(o.line, `${path}.line`), column: count(o.column, `${path}.column`) };
 }
 
+function tagOf(value: unknown, path: string): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) fail(path, "object expected");
+  const tag = (value as Json).type;
+  if (typeof tag !== "string") fail(`${path}.type`, "string expected");
+  return tag;
+}
+
+function dataStoreDetail(value: unknown, path: string): DataStoreDetail {
+  if (tagOf(value, path) !== "postgresTable") fail(`${path}.type`, "known detail type expected");
+  const o = object(value, path, ["type", "schema", "rls"]);
+  return { type: "postgresTable", schema: text(o.schema, `${path}.schema`), rls: oneOf(o.rls, `${path}.rls`, RLS_STATUSES) };
+}
+
+function accessRuleDetail(value: unknown, path: string): AccessRuleDetail {
+  if (tagOf(value, path) !== "postgresPolicy") fail(`${path}.type`, "known detail type expected");
+  const o = object(value, path, ["type", "command", "roles"]);
+  return {
+    type: "postgresPolicy",
+    command: oneOf(o.command, `${path}.command`, POLICY_COMMANDS),
+    roles: list(o.roles, `${path}.roles`, MAX_ROLES).map((role, i) => text(role, `${path}.roles[${i}]`)),
+  };
+}
+
+function configDetail(value: unknown, path: string): ConfigDetail {
+  if (tagOf(value, path) !== "envVar") fail(`${path}.type`, "known detail type expected");
+  const o = object(value, path, ["type", "exposedToClient"]);
+  return { type: "envVar", exposedToClient: flag(o.exposedToClient, `${path}.exposedToClient`) };
+}
+
+function credentialDetail(value: unknown, path: string): CredentialDetail {
+  if (tagOf(value, path) !== "secret") fail(`${path}.type`, "known detail type expected");
+  const o = object(value, path, ["type", "secretKind", "masked"]);
+  return {
+    type: "secret",
+    secretKind: oneOf(o.secretKind, `${path}.secretKind`, SECRET_KINDS),
+    masked: text(o.masked, `${path}.masked`),
+  };
+}
+
 function nodeKind(value: unknown, path: string): NodeKind {
-  const tag = object(value, path, ["type", "role", "schema", "rls", "command", "roles", "unrestricted", "exposedToBrowser", "secretKind", "masked"]).type;
-  switch (tag) {
-    case "file": {
-      const o = object(value, path, ["type", "role"]);
-      return { type: "file", role: oneOf(o.role, `${path}.role`, FILE_ROLES) };
-    }
-    case "table": {
-      const o = object(value, path, ["type", "schema", "rls"]);
-      return { type: "table", schema: text(o.schema, `${path}.schema`), rls: oneOf(o.rls, `${path}.rls`, RLS_STATUSES) };
-    }
-    case "policy": {
-      const o = object(value, path, ["type", "command", "roles", "unrestricted"]);
+  switch (tagOf(value, path)) {
+    case "component": {
+      const o = object(value, path, ["type", "runtime", "artifact", "unit", "basis"]);
       return {
-        type: "policy",
-        command: oneOf(o.command, `${path}.command`, POLICY_COMMANDS),
-        roles: list(o.roles, `${path}.roles`, 64).map((role, i) => text(role, `${path}.roles[${i}]`)),
-        unrestricted: flag(o.unrestricted, `${path}.unrestricted`),
+        type: "component",
+        runtime: oneOf(o.runtime, `${path}.runtime`, RUNTIMES),
+        artifact: oneOf(o.artifact, `${path}.artifact`, ARTIFACTS),
+        unit: oneOf(o.unit, `${path}.unit`, UNITS),
+        basis: oneOf(o.basis, `${path}.basis`, BASES),
       };
     }
-    case "envVar": {
-      const o = object(value, path, ["type", "exposedToBrowser"]);
-      return { type: "envVar", exposedToBrowser: flag(o.exposedToBrowser, `${path}.exposedToBrowser`) };
-    }
-    case "secret": {
-      const o = object(value, path, ["type", "secretKind", "masked"]);
+    case "entryPoint": {
+      const o = object(value, path, ["type", "channel", "exposure"]);
       return {
-        type: "secret",
-        secretKind: oneOf(o.secretKind, `${path}.secretKind`, SECRET_KINDS),
-        masked: text(o.masked, `${path}.masked`),
+        type: "entryPoint",
+        channel: oneOf(o.channel, `${path}.channel`, CHANNELS),
+        exposure: oneOf(o.exposure, `${path}.exposure`, EXPOSURES),
       };
     }
+    case "dataStore": {
+      const o = object(value, path, ["type", "detail"]);
+      return o.detail === undefined ? { type: "dataStore" } : { type: "dataStore", detail: dataStoreDetail(o.detail, `${path}.detail`) };
+    }
+    case "accessRule": {
+      const o = object(value, path, ["type", "scope", "strength", "detail"]);
+      const kind: NodeKind = { type: "accessRule", scope: oneOf(o.scope, `${path}.scope`, RULE_SCOPES) };
+      if (o.strength !== undefined) kind.strength = oneOf(o.strength, `${path}.strength`, STRENGTHS);
+      if (o.detail !== undefined) kind.detail = accessRuleDetail(o.detail, `${path}.detail`);
+      return kind;
+    }
+    case "principal":
+      object(value, path, ["type"]);
+      return { type: "principal" };
+    case "credential": {
+      const o = object(value, path, ["type", "detail"]);
+      return { type: "credential", detail: credentialDetail(o.detail, `${path}.detail`) };
+    }
+    case "config": {
+      const o = object(value, path, ["type", "detail"]);
+      return o.detail === undefined ? { type: "config" } : { type: "config", detail: configDetail(o.detail, `${path}.detail`) };
+    }
+    case "service":
+      object(value, path, ["type"]);
+      return { type: "service" };
     default:
       return fail(`${path}.type`, "known node type expected");
   }
@@ -215,13 +348,21 @@ export function parseScanReport(input: unknown): ScanReport {
     "filesExcluded",
     "truncated",
     "configFile",
+    "ecosystems",
+    "inputs",
+    "limitations",
   ]);
   const summary = object(root.summary, "report.summary", [...SEVERITIES, "accepted"]);
 
   const nodes = list(root.nodes, "report.nodes", MAX_NODES).map((value, i): ReportNode => {
     const path = `report.nodes[${i}]`;
-    const o = object(value, path, ["id", "label", "kind", "location"]);
-    const node: ReportNode = { id: text(o.id, `${path}.id`), label: text(o.label, `${path}.label`), kind: nodeKind(o.kind, `${path}.kind`) };
+    const o = object(value, path, ["id", "label", "kind", "zone", "location"]);
+    const node: ReportNode = {
+      id: text(o.id, `${path}.id`),
+      label: text(o.label, `${path}.label`),
+      kind: nodeKind(o.kind, `${path}.kind`),
+      zone: oneOf(o.zone, `${path}.zone`, ZONES),
+    };
     if (o.location !== undefined) node.location = location(o.location, `${path}.location`);
     return node;
   });
@@ -241,16 +382,51 @@ export function parseScanReport(input: unknown): ScanReport {
 
   const findings = list(root.findings, "report.findings", MAX_FINDINGS).map((value, i): Finding => {
     const path = `report.findings[${i}]`;
-    const o = object(value, path, ["id", "rule", "severity", "title", "explanation", "node", "location", "fixPrompt", "accepted"]);
+    const o = object(value, path, [
+      "id",
+      "rule",
+      "severity",
+      "confidence",
+      "title",
+      "explanation",
+      "node",
+      "location",
+      "evidence",
+      "origin",
+      "cwe",
+      "proof",
+      "fixPrompt",
+      "accepted",
+    ]);
+    const origin = object(o.origin, `${path}.origin`, ["engine", "inputs", "rule"]);
     const finding: Finding = {
       id: text(o.id, `${path}.id`),
       rule: text(o.rule, `${path}.rule`),
       severity: oneOf(o.severity, `${path}.severity`, SEVERITIES),
+      confidence: oneOf(o.confidence, `${path}.confidence`, CONFIDENCES),
       title: localized(o.title, `${path}.title`),
       explanation: localized(o.explanation, `${path}.explanation`),
       node: known(o.node, `${path}.node`),
+      evidence: list(o.evidence, `${path}.evidence`, MAX_STEPS).map((value, j): EvidenceStep => {
+        const stepPath = `${path}.evidence[${j}]`;
+        const s = object(value, stepPath, ["label", "via", "node", "location"]);
+        const step: EvidenceStep = { label: text(s.label, `${stepPath}.label`) };
+        if (s.via !== undefined) step.via = oneOf(s.via, `${stepPath}.via`, EDGE_KINDS);
+        if (s.node !== undefined) step.node = known(s.node, `${stepPath}.node`);
+        if (s.location !== undefined) step.location = location(s.location, `${stepPath}.location`);
+        return step;
+      }),
+      origin: {
+        engine: text(origin.engine, `${path}.origin.engine`),
+        inputs: list(origin.inputs, `${path}.origin.inputs`, MAX_LIST).map((value, j) =>
+          oneOf(value, `${path}.origin.inputs[${j}]`, INPUT_KINDS),
+        ),
+        ...(origin.rule === undefined ? {} : { rule: text(origin.rule, `${path}.origin.rule`) }),
+      },
+      cwe: list(o.cwe, `${path}.cwe`, MAX_CWE).map((value, j) => count(value, `${path}.cwe[${j}]`)),
     };
     if (o.location !== undefined) finding.location = location(o.location, `${path}.location`);
+    if (o.proof !== undefined) finding.proof = text(o.proof, `${path}.proof`);
     if (o.fixPrompt !== undefined) finding.fixPrompt = localized(o.fixPrompt, `${path}.fixPrompt`);
     if (o.accepted !== undefined) {
       const accepted = object(o.accepted, `${path}.accepted`, ["reason"]);
@@ -269,6 +445,18 @@ export function parseScanReport(input: unknown): ScanReport {
       filesExcluded: count(target.filesExcluded, "report.target.filesExcluded"),
       truncated: flag(target.truncated, "report.target.truncated"),
       ...(target.configFile === undefined ? {} : { configFile: text(target.configFile, "report.target.configFile") }),
+      ecosystems: list(target.ecosystems, "report.target.ecosystems", MAX_LIST).map((value, i) =>
+        oneOf(value, `report.target.ecosystems[${i}]`, ECOSYSTEMS),
+      ),
+      inputs: list(target.inputs, "report.target.inputs", MAX_LIST).map((value, i) => {
+        const o = object(value, `report.target.inputs[${i}]`, ["type"]);
+        return { type: oneOf(o.type, `report.target.inputs[${i}].type`, INPUT_KINDS) };
+      }),
+      limitations: list(target.limitations, "report.target.limitations", MAX_LIST).map((value, i): Limitation => {
+        const path = `report.target.limitations[${i}]`;
+        const o = object(value, path, ["code", "text"]);
+        return { code: oneOf(o.code, `${path}.code`, LIMITATION_CODES), text: localized(o.text, `${path}.text`) };
+      }),
     },
     summary: {
       critical: count(summary.critical, "report.summary.critical"),

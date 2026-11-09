@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -36,6 +36,51 @@ pub struct TargetInfo {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_file: Option<String>,
+    pub ecosystems: Vec<Ecosystem>,
+    pub inputs: Vec<Input>,
+    pub limitations: Vec<Limitation>,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Ecosystem {
+    Next,
+    Vite,
+    Supabase,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum Input {
+    Source {},
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum InputKind {
+    Source,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Limitation {
+    pub code: LimitationCode,
+    pub text: LocalizedText,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum LimitationCode {
+    BuildOutputNotRead,
+    DashboardPoliciesUnseen,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -108,57 +153,226 @@ pub struct Node {
     pub id: NodeId,
     pub label: String,
     pub kind: NodeKind,
+    pub zone: Zone,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum NodeKind {
-    File {
-        role: FileRole,
-    },
-    Table {
-        schema: String,
-        rls: RlsStatus,
-    },
-    Policy {
-        command: PolicyCommand,
-        roles: Vec<String>,
-        unrestricted: bool,
-    },
-    EnvVar {
-        exposed_to_browser: bool,
-    },
-    Secret {
-        secret_kind: SecretKind,
-        masked: MaskedSecret,
-    },
 }
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "camelCase")]
-pub enum FileRole {
-    BrowserCode,
-    ServerCode,
-    EdgeFunction,
-    UnknownCode,
-    Migration,
-    EnvFile,
+pub enum Zone {
+    Client,
+    Server,
+    Database,
+    Device,
+    BuildTime,
+    ThirdParty,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum NodeKind {
+    Component {
+        runtime: Runtime,
+        artifact: Artifact,
+        unit: Unit,
+        basis: Basis,
+    },
+    EntryPoint {
+        channel: Channel,
+        exposure: Exposure,
+    },
+    DataStore {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<DataStoreDetail>,
+    },
+    AccessRule {
+        scope: RuleScope,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength: Option<Strength>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<AccessRuleDetail>,
+    },
+    Principal {},
+    Credential {
+        detail: CredentialDetail,
+    },
+    Config {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<ConfigDetail>,
+    },
+    Service {},
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Runtime {
+    Browser,
+    Server,
+    Edge,
+    Mobile,
+    Native,
+    Firmware,
+    Database,
+    Build,
+    Unknown,
+}
+
+impl Runtime {
+    pub fn zone(self) -> Zone {
+        match self {
+            Self::Browser | Self::Mobile | Self::Native => Zone::Client,
+            Self::Server | Self::Edge => Zone::Server,
+            Self::Firmware => Zone::Device,
+            Self::Database => Zone::Database,
+            Self::Build => Zone::BuildTime,
+            Self::Unknown => Zone::Unknown,
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Artifact {
+    Source,
     BuildOutput,
+    Migration,
+    Config,
+    Binary,
     Other,
 }
 
-impl FileRole {
-    pub fn runs_in_browser(self) -> bool {
-        matches!(self, Self::BrowserCode | Self::BuildOutput)
-    }
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Unit {
+    File,
+    Function,
+    Image,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Basis {
+    Path,
+    Directive,
+    Imports,
+    BuildOutput,
+    Engine,
+    Dynamic,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Channel {
+    HttpRoute,
+    ServerAction,
+    Rpc,
+    Cli,
+    Ipc,
+    Queue,
+    Schedule,
+    Serial,
+    Ble,
+    Socket,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Exposure {
+    Public,
+    Authenticated,
+    Internal,
+    Unknown,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleScope {
+    Open,
+    Conditional,
+    Unknown,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Strength {
+    Verified,
+    Weak,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum DataStoreDetail {
+    PostgresTable { schema: String, rls: RlsStatus },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AccessRuleDetail {
+    PostgresPolicy {
+        command: PolicyCommand,
+        roles: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ConfigDetail {
+    EnvVar { exposed_to_client: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CredentialDetail {
+    Secret {
+        secret_kind: SecretKind,
+        masked: MaskedSecret,
+    },
 }
 
 #[derive(
@@ -236,12 +450,20 @@ pub struct Edge {
 )]
 #[serde(rename_all = "camelCase")]
 pub enum EdgeKind {
+    Imports,
+    Calls,
+    BuiltFrom,
+    Invokes,
+    Reads,
+    Writes,
+    UsesConfig,
     Defines,
     GuardedBy,
-    Queries,
-    Writes,
-    Reads,
+    ActsAs,
+    AppliesTo,
     Contains,
+    Unlocks,
+    ConnectsTo,
 }
 
 #[derive(
@@ -254,6 +476,16 @@ pub enum Severity {
     Medium,
     Low,
     Info,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Confidence {
+    Certain,
+    Likely,
+    Review,
 }
 
 #[derive(
@@ -282,6 +514,18 @@ impl RuleId {
             Self::SupabaseTableSchemaMissing => "supabase-table-schema-missing",
         }
     }
+
+    pub fn cwe(self) -> &'static [u32] {
+        match self {
+            Self::SupabaseRlsDisabled => &[862],
+            Self::SupabasePolicyUnrestricted => &[285],
+            Self::SupabaseServiceRoleInBrowser
+            | Self::SecretInBrowserCode
+            | Self::SecretInSourceCode
+            | Self::SecretInPublicEnvVar => &[798],
+            Self::SupabaseTableSchemaMissing => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -290,11 +534,17 @@ pub struct Finding {
     pub id: String,
     pub rule: RuleId,
     pub severity: Severity,
+    pub confidence: Confidence,
     pub title: LocalizedText,
     pub explanation: LocalizedText,
     pub node: NodeId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
+    pub evidence: Vec<EvidenceStep>,
+    pub origin: Origin,
+    pub cwe: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<ProofRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fix_prompt: Option<LocalizedText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -303,6 +553,76 @@ pub struct Finding {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvidenceStep {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<EdgeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Origin {
+    pub engine: String,
+    pub inputs: Vec<InputKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+}
+
+impl Origin {
+    pub fn seethru() -> Self {
+        Self {
+            engine: "seethru".to_owned(),
+            inputs: vec![InputKind::Source],
+            rule: None,
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ProofRef(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Acceptance {
     pub reason: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Node, NodeKind, RlsStatus, Zone};
+
+    #[test]
+    fn node_kinds_reject_unknown_fields() {
+        let table = r#"{"id":"table:public.a","label":"a","zone":"database","kind":{"type":"dataStore","detail":{"type":"postgresTable","schema":"public","rls":"enabled"}}}"#;
+        let parsed: Result<Node, _> = serde_json::from_str(table);
+        assert!(
+            matches!(
+                parsed,
+                Ok(Node {
+                    zone: Zone::Database,
+                    kind: NodeKind::DataStore { detail: Some(_) },
+                    ..
+                })
+            ),
+            "{parsed:?}"
+        );
+        let extra_in_kind = table.replace(r#""type":"dataStore","#, r#""type":"dataStore","x":1,"#);
+        assert!(serde_json::from_str::<Node>(&extra_in_kind).is_err());
+        let extra_in_detail = table.replace(r#""rls":"enabled""#, r#""rls":"enabled","x":1"#);
+        assert!(serde_json::from_str::<Node>(&extra_in_detail).is_err());
+        let extra_on_node = table.replace(r#""label":"a","#, r#""label":"a","x":1,"#);
+        assert!(serde_json::from_str::<Node>(&extra_on_node).is_err());
+        let unit_variant = r#"{"id":"principal:supabase:anon","label":"anon","zone":"database","kind":{"type":"principal"}}"#;
+        assert!(serde_json::from_str::<Node>(unit_variant).is_ok());
+        let unit_with_extra = r#"{"id":"principal:supabase:anon","label":"anon","zone":"database","kind":{"type":"principal","x":1}}"#;
+        assert!(serde_json::from_str::<Node>(unit_with_extra).is_err());
+        let _ = RlsStatus::Enabled;
+    }
 }

@@ -142,7 +142,9 @@ fn config_error(message: &str) -> ScanError {
 
 #[cfg(test)]
 mod tests {
-    use seethru_core::{Finding, LocalizedText, Location, NodeId, RuleId, Severity};
+    use seethru_core::{
+        Confidence, Finding, LocalizedText, Location, NodeId, Origin, RuleId, Severity,
+    };
 
     use super::Config;
 
@@ -151,6 +153,7 @@ mod tests {
             id: format!("{}:node", rule.as_str()),
             rule,
             severity: Severity::Medium,
+            confidence: Confidence::Certain,
             title: LocalizedText::default(),
             explanation: LocalizedText::default(),
             node: NodeId::new("node"),
@@ -159,6 +162,10 @@ mod tests {
                 line: 1,
                 column: 1,
             }),
+            evidence: Vec::new(),
+            origin: Origin::seethru(),
+            cwe: Vec::new(),
+            proof: None,
             fix_prompt: None,
             accepted: None,
         }

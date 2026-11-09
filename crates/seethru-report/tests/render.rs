@@ -1,6 +1,6 @@
 use seethru_core::{
-    Lang, MaskedSecret, Node, NodeId, NodeKind, SCHEMA_VERSION, ScanReport, SecretKind, Summary,
-    TargetInfo, ToolInfo,
+    CredentialDetail, Lang, MaskedSecret, Node, NodeId, NodeKind, SCHEMA_VERSION, ScanReport,
+    SecretKind, Summary, TargetInfo, ToolInfo, Zone,
 };
 
 fn raw_secret() -> String {
@@ -21,15 +21,21 @@ fn report() -> ScanReport {
             files_excluded: 0,
             truncated: false,
             config_file: None,
+            ecosystems: Vec::new(),
+            inputs: Vec::new(),
+            limitations: Vec::new(),
         },
         summary: Summary::default(),
         nodes: vec![Node {
             id: NodeId::new("secret:a"),
             label: "</script><script>alert(1)</script>".to_owned(),
-            kind: NodeKind::Secret {
-                secret_kind: SecretKind::StripeSecretKey,
-                masked: MaskedSecret::mask(&raw_secret(), 8),
+            kind: NodeKind::Credential {
+                detail: CredentialDetail::Secret {
+                    secret_kind: SecretKind::StripeSecretKey,
+                    masked: MaskedSecret::mask(&raw_secret(), 8),
+                },
             },
+            zone: Zone::Client,
             location: None,
         }],
         edges: Vec::new(),

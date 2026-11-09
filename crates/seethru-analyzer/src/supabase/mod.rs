@@ -3,11 +3,12 @@ mod lexer;
 use std::collections::{BTreeMap, BTreeSet};
 
 use seethru_core::{
-    EdgeKind, FileRole, Location, Node, NodeId, NodeKind, PolicyCommand, RlsStatus, RuleId,
-    Severity,
+    AccessRuleDetail, Basis, Confidence, DataStoreDetail, EdgeKind, Location, Node, NodeId,
+    NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
 };
 
-use crate::graph::Graph;
+use crate::classify::FileRole;
+use crate::graph::{Graph, Verdict, file_location, file_step, step};
 use crate::rules;
 use lexer::{Kind, Token, statements, tokenize};
 
@@ -276,34 +277,51 @@ impl Migrations {
                 continue;
             }
             let table_id = table_id(key);
+            let label = table_label(key);
             graph.add_node(Node {
                 id: table_id.clone(),
-                label: table_label(key),
-                kind: NodeKind::Table {
-                    schema: key.schema.clone(),
-                    rls: table.rls,
+                label: label.clone(),
+                kind: NodeKind::DataStore {
+                    detail: Some(DataStoreDetail::PostgresTable {
+                        schema: key.schema.clone(),
+                        rls: table.rls,
+                    }),
                 },
+                zone: Zone::Database,
                 location: table
                     .defined_at
                     .clone()
                     .or_else(|| table.rls_changed_at.clone()),
             });
+            let mut evidence = Vec::new();
             if let Some(path) = self.defined_in.get(key) {
-                let file_id = graph.add_file(path, FileRole::Migration);
+                let file_id = graph.add_file(path, FileRole::Migration, Basis::Path);
                 graph.add_edge(file_id, table_id.clone(), EdgeKind::Defines);
+                evidence.push(file_step(path, None, file_location(path)));
             }
             let exposed = EXPOSED_SCHEMAS.contains(&key.schema.as_str());
             if exposed && table.rls == RlsStatus::Disabled {
-                let text = rules::rls_disabled(&table_label(key));
+                let text = rules::rls_disabled(&label);
+                let at = table
+                    .rls_changed_at
+                    .clone()
+                    .or_else(|| table.defined_at.clone());
+                evidence.push(step(
+                    &label,
+                    evidence.first().map(|_| EdgeKind::Defines),
+                    Some(table_id.clone()),
+                    at.clone(),
+                ));
                 graph.add_finding(
-                    RuleId::SupabaseRlsDisabled,
-                    Severity::Critical,
+                    Verdict {
+                        rule: RuleId::SupabaseRlsDisabled,
+                        severity: Severity::Critical,
+                        confidence: Confidence::Certain,
+                    },
                     text,
                     table_id,
-                    table
-                        .rls_changed_at
-                        .clone()
-                        .or_else(|| table.defined_at.clone()),
+                    at,
+                    evidence,
                 );
             }
         }
@@ -317,11 +335,19 @@ impl Migrations {
             graph.add_node(Node {
                 id: policy_id.clone(),
                 label: name.clone(),
-                kind: NodeKind::Policy {
-                    command: policy.command,
-                    roles: policy.roles.clone(),
-                    unrestricted: reach.is_some(),
+                kind: NodeKind::AccessRule {
+                    scope: if policy_open(policy) {
+                        RuleScope::Open
+                    } else {
+                        RuleScope::Conditional
+                    },
+                    strength: None,
+                    detail: Some(AccessRuleDetail::PostgresPolicy {
+                        command: policy.command,
+                        roles: policy.roles.clone(),
+                    }),
                 },
+                zone: Zone::Database,
                 location: Some(policy.location.clone()),
             });
             graph.add_edge(table_id(key), policy_id.clone(), EdgeKind::GuardedBy);
@@ -335,12 +361,34 @@ impl Migrations {
                     reach == Reach::Anyone,
                     policy.command,
                 );
+                let mut evidence = Vec::new();
+                if let Some(table) = self.tables.get(key) {
+                    evidence.push(step(
+                        &table_label(key),
+                        None,
+                        Some(table_id(key)),
+                        table
+                            .defined_at
+                            .clone()
+                            .or_else(|| table.rls_changed_at.clone()),
+                    ));
+                }
+                evidence.push(step(
+                    name,
+                    evidence.first().map(|_| EdgeKind::GuardedBy),
+                    Some(policy_id.clone()),
+                    Some(policy.location.clone()),
+                ));
                 graph.add_finding(
-                    RuleId::SupabasePolicyUnrestricted,
-                    severity,
+                    Verdict {
+                        rule: RuleId::SupabasePolicyUnrestricted,
+                        severity,
+                        confidence: Confidence::Certain,
+                    },
                     text,
                     policy_id,
                     Some(policy.location.clone()),
+                    evidence,
                 );
             }
         }
@@ -353,18 +401,18 @@ enum Reach {
     SignedIn,
 }
 
-fn policy_reach(policy: &Policy) -> Option<Reach> {
-    if !policy.permissive {
-        return None;
-    }
-    let open = match policy.command {
+fn policy_open(policy: &Policy) -> bool {
+    match policy.command {
         PolicyCommand::Insert => policy.check_true,
         PolicyCommand::Select
         | PolicyCommand::Update
         | PolicyCommand::Delete
         | PolicyCommand::All => policy.using_true,
-    };
-    if !open {
+    }
+}
+
+fn policy_reach(policy: &Policy) -> Option<Reach> {
+    if !policy.permissive || !policy_open(policy) {
         return None;
     }
     let has = |roles: &[&str]| {

@@ -1,4 +1,7 @@
-use seethru_core::{NodeKind, PolicyCommand, RlsStatus, RuleId, Severity, TargetInfo};
+use seethru_core::{
+    AccessRuleDetail, DataStoreDetail, NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope,
+    Severity, TargetInfo,
+};
 
 use super::Migrations;
 use crate::graph::Graph;
@@ -17,6 +20,9 @@ fn run(files: &[(&str, &str)]) -> seethru_core::ScanReport {
         files_excluded: 0,
         truncated: false,
         config_file: None,
+        ecosystems: Vec::new(),
+        inputs: Vec::new(),
+        limitations: Vec::new(),
     })
 }
 
@@ -25,8 +31,10 @@ fn rls_of(report: &seethru_core::ScanReport, id: &str) -> Option<RlsStatus> {
         .nodes
         .iter()
         .find(|node| node.id.as_str() == id)
-        .and_then(|node| match node.kind {
-            NodeKind::Table { rls, .. } => Some(rls),
+        .and_then(|node| match &node.kind {
+            NodeKind::DataStore {
+                detail: Some(DataStoreDetail::PostgresTable { rls, .. }),
+            } => Some(*rls),
             _ => None,
         })
 }
@@ -147,9 +155,12 @@ create policy "Allow all" on public.todos for all to anon, authenticated using (
         .find(|node| node.id.as_str() == "policy:public.todos/Allow all");
     assert!(matches!(
         policy.map(|node| &node.kind),
-        Some(NodeKind::Policy {
-            command: PolicyCommand::All,
-            unrestricted: true,
+        Some(NodeKind::AccessRule {
+            scope: RuleScope::Open,
+            detail: Some(AccessRuleDetail::PostgresPolicy {
+                command: PolicyCommand::All,
+                ..
+            }),
             ..
         })
     ));

@@ -4,16 +4,31 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     tool: { name: "seethru", version: "0.1.0" },
-    target: { name: "app", filesScanned: 2, filesSkipped: 0, filesExcluded: 0, truncated: false },
+    target: {
+      name: "app",
+      filesScanned: 2,
+      filesSkipped: 0,
+      filesExcluded: 0,
+      truncated: false,
+      ecosystems: ["supabase"],
+      inputs: [{ type: "source" }],
+      limitations: [{ code: "dashboardPoliciesUnseen", text: { en: "l", ko: "한계" } }],
+    },
     summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0, accepted: 0 },
     nodes: [
-      { id: "file:a.sql", label: "a.sql", kind: { type: "file", role: "migration" } },
+      {
+        id: "file:a.sql",
+        label: "a.sql",
+        kind: { type: "component", runtime: "database", artifact: "migration", unit: "file", basis: "path" },
+        zone: "database",
+      },
       {
         id: "table:public.todos",
         label: "todos",
-        kind: { type: "table", schema: "public", rls: "disabled" },
+        kind: { type: "dataStore", detail: { type: "postgresTable", schema: "public", rls: "disabled" } },
+        zone: "database",
         location: { path: "a.sql", line: 1, column: 1 },
       },
     ],
@@ -23,9 +38,16 @@ function validReport(): Record<string, unknown> {
         id: "supabase-rls-disabled:table:public.todos",
         rule: "supabase-rls-disabled",
         severity: "critical",
+        confidence: "certain",
         title: { en: "t", ko: "제목" },
         explanation: { en: "e", ko: "설명" },
         node: "table:public.todos",
+        evidence: [
+          { label: "a.sql", node: "file:a.sql", location: { path: "a.sql", line: 1, column: 1 } },
+          { label: "todos", via: "defines", node: "table:public.todos", location: { path: "a.sql", line: 1, column: 1 } },
+        ],
+        origin: { engine: "seethru", inputs: ["source"] },
+        cwe: [862],
         fixPrompt: { en: "p", ko: "프롬프트" },
       },
     ],
@@ -36,7 +58,58 @@ test("accepts a valid report", () => {
   const report = parseScanReport(validReport());
   assert.equal(report.nodes.length, 2);
   assert.equal(report.findings[0]?.severity, "critical");
+  assert.equal(report.findings[0]?.confidence, "certain");
+  assert.equal(report.findings[0]?.evidence.length, 2);
+  assert.deepEqual(report.findings[0]?.cwe, [862]);
+  assert.deepEqual(report.target.ecosystems, ["supabase"]);
+  assert.equal(report.target.limitations[0]?.code, "dashboardPoliciesUnseen");
+  assert.equal(report.nodes[1]?.zone, "database");
   assert.equal(worstSeverity(report.findings), "critical");
+});
+
+test("accepts every node kind and rejects extra fields inside kind and detail", () => {
+  const kinds = [
+    { type: "component", runtime: "browser", artifact: "source", unit: "file", basis: "imports" },
+    { type: "entryPoint", channel: "httpRoute", exposure: "unknown" },
+    { type: "dataStore" },
+    { type: "accessRule", scope: "open", strength: "weak", detail: { type: "postgresPolicy", command: "select", roles: ["anon"] } },
+    { type: "principal" },
+    { type: "credential", detail: { type: "secret", secretKind: "stripeSecretKey", masked: "sk_live_****" } },
+    { type: "config", detail: { type: "envVar", exposedToClient: true } },
+    { type: "service" },
+  ];
+  const report = validReport();
+  report.nodes = kinds.map((kind, i) => ({ id: `n${i}`, label: "n", kind, zone: "unknown" }));
+  report.edges = [];
+  report.findings = [];
+  assert.equal(parseScanReport(report).nodes.length, kinds.length);
+
+  const extraInKind = validReport();
+  extraInKind.nodes = [{ id: "x", label: "x", kind: { type: "principal", extra: 1 }, zone: "unknown" }];
+  extraInKind.edges = [];
+  extraInKind.findings = [];
+  assert.throws(() => parseScanReport(extraInKind), /kind\.extra/);
+
+  const extraInDetail = validReport();
+  extraInDetail.nodes = [
+    { id: "x", label: "x", kind: { type: "dataStore", detail: { type: "postgresTable", schema: "public", rls: "enabled", extra: 1 } }, zone: "database" },
+  ];
+  extraInDetail.edges = [];
+  extraInDetail.findings = [];
+  assert.throws(() => parseScanReport(extraInDetail), /detail\.extra/);
+
+  const noZone = validReport();
+  noZone.nodes = [{ id: "x", label: "x", kind: { type: "service" } }];
+  noZone.edges = [];
+  noZone.findings = [];
+  assert.throws(() => parseScanReport(noZone), /zone/);
+});
+
+test("rejects evidence steps that point at missing nodes", () => {
+  const report = validReport();
+  const finding = (report.findings as Record<string, unknown>[])[0];
+  report.findings = [{ ...finding, evidence: [{ label: "ghost", node: "ghost" }] }];
+  assert.throws(() => parseScanReport(report), /known node/);
 });
 
 test("rejects unknown fields", () => {
@@ -92,13 +165,13 @@ test("rejects unknown enum values and node types", () => {
   assert.throws(() => parseScanReport(badSeverity), ReportError);
 
   const badKind = validReport();
-  badKind.nodes = [{ id: "x", label: "x", kind: { type: "script", src: "https://example.invalid/x.js" } }];
+  badKind.nodes = [{ id: "x", label: "x", kind: { type: "script", src: "https://example.invalid/x.js" }, zone: "unknown" }];
   assert.throws(() => parseScanReport(badKind), ReportError);
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 2 }), /version 3 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 4 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 3 }), /version 4 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 5 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -109,16 +182,16 @@ test("rejects duplicate node ids and negative counts", () => {
   assert.throws(() => parseScanReport(duplicate), /unique/);
 
   const negative = validReport();
-  negative.target = { name: "app", filesScanned: -1, filesSkipped: 0, filesExcluded: 0, truncated: false };
+  negative.target = { ...(validReport().target as object), filesScanned: -1 };
   assert.throws(() => parseScanReport(negative), ReportError);
 });
 
 test("lists each edge kind in the report once in a fixed order", () => {
   const edges = [
-    { from: "a", to: "b", kind: "reads" },
+    { from: "a", to: "b", kind: "usesConfig" },
     { from: "a", to: "c", kind: "defines" },
     { from: "b", to: "c", kind: "reads" },
   ] as const;
-  assert.deepEqual(edgeKindsIn({ edges: [...edges] }), ["defines", "reads"]);
+  assert.deepEqual(edgeKindsIn({ edges: [...edges] }), ["reads", "usesConfig", "defines"]);
   assert.deepEqual(edgeKindsIn({ edges: [] }), []);
 });

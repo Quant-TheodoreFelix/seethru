@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use seethru_core::{EdgeKind, FileRole, NodeKind, RuleId, Severity};
+use seethru_core::{Artifact, Basis, EdgeKind, NodeKind, RuleId, Runtime, Severity, Zone};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -61,7 +61,7 @@ fn supabase_vite_fixture_reports_expected_findings() {
     assert!(edge(
         "file:src/pages/Todos.tsx",
         "table:public.todos",
-        EdgeKind::Queries
+        EdgeKind::Reads
     ));
     assert!(edge(
         "file:src/pages/Todos.tsx",
@@ -71,7 +71,7 @@ fn supabase_vite_fixture_reports_expected_findings() {
     assert!(edge(
         "file:src/lib/admin.ts",
         "env:VITE_SUPABASE_SERVICE_ROLE_KEY",
-        EdgeKind::Reads
+        EdgeKind::UsesConfig
     ));
     assert!(edge(
         "file:src/lib/admin.ts",
@@ -81,8 +81,27 @@ fn supabase_vite_fixture_reports_expected_findings() {
     assert!(edge(
         "file:supabase/functions/admin-report/index.ts",
         "env:SUPABASE_SERVICE_ROLE_KEY",
-        EdgeKind::Reads
+        EdgeKind::UsesConfig
     ));
+    assert_eq!(report.schema_version, 4);
+    assert_eq!(
+        report.target.ecosystems,
+        vec![
+            seethru_core::Ecosystem::Vite,
+            seethru_core::Ecosystem::Supabase
+        ]
+    );
+    assert_eq!(report.target.inputs, vec![seethru_core::Input::Source {}]);
+    assert_eq!(report.target.limitations.len(), 2);
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| !finding.evidence.is_empty())
+    );
+    assert!(report.findings.iter().all(|finding| {
+        finding.evidence.last().and_then(|step| step.node.as_ref()) == Some(&finding.node)
+    }));
 }
 
 #[test]
@@ -102,29 +121,58 @@ fn supabase_next_fixture_tells_server_code_from_browser_code() {
     assert!(result.is_ok(), "{result:?}");
     let Ok(report) = result else { return };
 
-    let role = |path: &str| {
+    let component = |path: &str| {
         report.nodes.iter().find_map(|node| match &node.kind {
-            NodeKind::File { role } if node.id.as_str() == format!("file:{path}") => Some(*role),
+            NodeKind::Component {
+                runtime,
+                artifact,
+                basis,
+                ..
+            } if node.id.as_str() == format!("file:{path}") => {
+                Some((*runtime, *artifact, *basis, node.zone))
+            }
             _ => None,
         })
     };
+    let source =
+        |runtime: Runtime, basis: Basis| Some((runtime, Artifact::Source, basis, runtime.zone()));
     assert_eq!(
-        role("src/components/TodoList.tsx"),
-        Some(FileRole::BrowserCode)
+        component("src/components/TodoList.tsx"),
+        source(Runtime::Browser, Basis::Directive)
     );
-    assert_eq!(role("src/lib/admin.ts"), Some(FileRole::BrowserCode));
     assert_eq!(
-        role("src/lib/supabase-browser.ts"),
-        Some(FileRole::BrowserCode)
+        component("src/lib/admin.ts"),
+        source(Runtime::Browser, Basis::Imports)
     );
-    assert_eq!(role("src/app/actions.ts"), Some(FileRole::ServerCode));
     assert_eq!(
-        role("src/app/api/todos/route.ts"),
-        Some(FileRole::ServerCode)
+        component("src/lib/supabase-browser.ts"),
+        source(Runtime::Browser, Basis::Imports)
     );
-    assert_eq!(role("src/lib/admin-server.ts"), Some(FileRole::ServerCode));
-    assert_eq!(role("src/lib/stats.ts"), Some(FileRole::ServerCode));
-    assert_eq!(role("scripts/seed.ts"), Some(FileRole::UnknownCode));
+    assert_eq!(
+        component("src/app/actions.ts"),
+        source(Runtime::Server, Basis::Directive)
+    );
+    assert_eq!(
+        component("src/app/api/todos/route.ts"),
+        source(Runtime::Server, Basis::Path)
+    );
+    assert_eq!(
+        component("src/lib/admin-server.ts"),
+        source(Runtime::Server, Basis::Directive)
+    );
+    assert_eq!(
+        component("src/lib/stats.ts"),
+        source(Runtime::Server, Basis::Imports)
+    );
+    assert_eq!(
+        component("scripts/seed.ts"),
+        source(Runtime::Unknown, Basis::Path)
+    );
+    assert_eq!(
+        component("supabase/migrations/20250301000000_todos.sql")
+            .map(|(runtime, artifact, _, zone)| (runtime, artifact, zone)),
+        Some((Runtime::Database, Artifact::Migration, Zone::Database))
+    );
 
     let got: Vec<(RuleId, &str)> = report
         .findings
@@ -137,6 +185,50 @@ fn supabase_next_fixture_tells_server_code_from_browser_code() {
             RuleId::SupabaseServiceRoleInBrowser,
             "env:NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"
         )]
+    );
+    type Step<'a> = (
+        &'a str,
+        Option<EdgeKind>,
+        Option<&'a str>,
+        Option<(&'a str, u32)>,
+    );
+    let evidence: Vec<Step<'_>> = report
+        .findings
+        .iter()
+        .flat_map(|finding| &finding.evidence)
+        .map(|step| {
+            (
+                step.label.as_str(),
+                step.via,
+                step.node.as_ref().map(|node| node.as_str()),
+                step.location
+                    .as_ref()
+                    .map(|location| (location.path.as_str(), location.line)),
+            )
+        })
+        .collect();
+    assert_eq!(
+        evidence,
+        vec![
+            (
+                "TodoList.tsx",
+                None,
+                Some("file:src/components/TodoList.tsx"),
+                Some(("src/components/TodoList.tsx", 1))
+            ),
+            (
+                "admin.ts",
+                Some(EdgeKind::Imports),
+                Some("file:src/lib/admin.ts"),
+                Some(("src/components/TodoList.tsx", 5))
+            ),
+            (
+                "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY",
+                Some(EdgeKind::UsesConfig),
+                Some("env:NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"),
+                Some(("src/lib/admin.ts", 5))
+            ),
+        ]
     );
 }
 

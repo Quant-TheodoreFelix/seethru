@@ -4,9 +4,11 @@ mod secret;
 
 pub use lang::{Lang, LocalizedText};
 pub use report::{
-    Acceptance, Edge, EdgeKind, FileRole, Finding, Location, Node, NodeId, NodeKind, PolicyCommand,
-    RlsStatus, RuleId, SCHEMA_VERSION, ScanReport, SecretKind, Severity, Summary, TargetInfo,
-    ToolInfo,
+    Acceptance, AccessRuleDetail, Artifact, Basis, Channel, Confidence, ConfigDetail,
+    CredentialDetail, DataStoreDetail, Ecosystem, Edge, EdgeKind, EvidenceStep, Exposure, Finding,
+    Input, InputKind, Limitation, LimitationCode, Location, Node, NodeId, NodeKind, Origin,
+    PolicyCommand, ProofRef, RlsStatus, RuleId, RuleScope, Runtime, SCHEMA_VERSION, ScanReport,
+    SecretKind, Severity, Strength, Summary, TargetInfo, ToolInfo, Unit, Zone,
 };
 pub use secret::MaskedSecret;
 

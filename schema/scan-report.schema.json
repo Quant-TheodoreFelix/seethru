@@ -12,6 +12,158 @@
       ],
       "type": "object"
     },
+    "AccessRuleDetail": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/PolicyCommand"
+            },
+            "roles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "postgresPolicy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "roles"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Artifact": {
+      "enum": [
+        "source",
+        "buildOutput",
+        "migration",
+        "config",
+        "binary",
+        "other"
+      ],
+      "type": "string"
+    },
+    "Basis": {
+      "enum": [
+        "path",
+        "directive",
+        "imports",
+        "buildOutput",
+        "engine",
+        "dynamic"
+      ],
+      "type": "string"
+    },
+    "Channel": {
+      "enum": [
+        "httpRoute",
+        "serverAction",
+        "rpc",
+        "cli",
+        "ipc",
+        "queue",
+        "schedule",
+        "serial",
+        "ble",
+        "socket"
+      ],
+      "type": "string"
+    },
+    "Confidence": {
+      "enum": [
+        "certain",
+        "likely",
+        "review"
+      ],
+      "type": "string"
+    },
+    "ConfigDetail": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exposedToClient": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "envVar",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "exposedToClient"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CredentialDetail": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "masked": {
+              "type": "string"
+            },
+            "secretKind": {
+              "$ref": "#/$defs/SecretKind"
+            },
+            "type": {
+              "const": "secret",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "secretKind",
+            "masked"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DataStoreDetail": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "rls": {
+              "$ref": "#/$defs/RlsStatus"
+            },
+            "schema": {
+              "type": "string"
+            },
+            "type": {
+              "const": "postgresTable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "schema",
+            "rls"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Ecosystem": {
+      "enum": [
+        "next",
+        "vite",
+        "supabase"
+      ],
+      "type": "string"
+    },
     "Edge": {
       "additionalProperties": false,
       "properties": {
@@ -34,25 +186,67 @@
     },
     "EdgeKind": {
       "enum": [
+        "imports",
+        "calls",
+        "builtFrom",
+        "invokes",
+        "reads",
+        "writes",
+        "usesConfig",
         "defines",
         "guardedBy",
-        "queries",
-        "writes",
-        "reads",
-        "contains"
+        "actsAs",
+        "appliesTo",
+        "contains",
+        "unlocks",
+        "connectsTo"
       ],
       "type": "string"
     },
-    "FileRole": {
+    "EvidenceStep": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "node": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "via": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "Exposure": {
       "enum": [
-        "browserCode",
-        "serverCode",
-        "edgeFunction",
-        "unknownCode",
-        "migration",
-        "envFile",
-        "buildOutput",
-        "other"
+        "public",
+        "authenticated",
+        "internal",
+        "unknown"
       ],
       "type": "string"
     },
@@ -68,6 +262,23 @@
               "type": "null"
             }
           ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "cwe": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceStep"
+          },
+          "type": "array"
         },
         "explanation": {
           "$ref": "#/$defs/LocalizedText"
@@ -98,6 +309,15 @@
         "node": {
           "type": "string"
         },
+        "origin": {
+          "$ref": "#/$defs/Origin"
+        },
+        "proof": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "rule": {
           "$ref": "#/$defs/RuleId"
         },
@@ -112,11 +332,61 @@
         "id",
         "rule",
         "severity",
+        "confidence",
         "title",
         "explanation",
-        "node"
+        "node",
+        "evidence",
+        "origin",
+        "cwe"
       ],
       "type": "object"
+    },
+    "Input": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputKind": {
+      "enum": [
+        "source"
+      ],
+      "type": "string"
+    },
+    "Limitation": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/LimitationCode"
+        },
+        "text": {
+          "$ref": "#/$defs/LocalizedText"
+        }
+      },
+      "required": [
+        "code",
+        "text"
+      ],
+      "type": "object"
+    },
+    "LimitationCode": {
+      "enum": [
+        "buildOutputNotRead",
+        "dashboardPoliciesUnseen"
+      ],
+      "type": "string"
     },
     "LocalizedText": {
       "additionalProperties": false,
@@ -179,117 +449,223 @@
               "type": "null"
             }
           ]
+        },
+        "zone": {
+          "$ref": "#/$defs/Zone"
         }
       },
       "required": [
         "id",
         "label",
-        "kind"
+        "kind",
+        "zone"
       ],
       "type": "object"
     },
     "NodeKind": {
       "oneOf": [
         {
+          "additionalProperties": false,
           "properties": {
-            "role": {
-              "$ref": "#/$defs/FileRole"
+            "artifact": {
+              "$ref": "#/$defs/Artifact"
+            },
+            "basis": {
+              "$ref": "#/$defs/Basis"
+            },
+            "runtime": {
+              "$ref": "#/$defs/Runtime"
             },
             "type": {
-              "const": "file",
+              "const": "component",
               "type": "string"
+            },
+            "unit": {
+              "$ref": "#/$defs/Unit"
             }
           },
           "required": [
             "type",
-            "role"
+            "runtime",
+            "artifact",
+            "unit",
+            "basis"
           ],
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "rls": {
-              "$ref": "#/$defs/RlsStatus"
+            "channel": {
+              "$ref": "#/$defs/Channel"
             },
-            "schema": {
-              "type": "string"
+            "exposure": {
+              "$ref": "#/$defs/Exposure"
             },
             "type": {
-              "const": "table",
+              "const": "entryPoint",
               "type": "string"
             }
           },
           "required": [
             "type",
-            "schema",
-            "rls"
+            "channel",
+            "exposure"
           ],
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "command": {
-              "$ref": "#/$defs/PolicyCommand"
-            },
-            "roles": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
+            "detail": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DataStoreDetail"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
-              "const": "policy",
+              "const": "dataStore",
               "type": "string"
-            },
-            "unrestricted": {
-              "type": "boolean"
             }
           },
           "required": [
-            "type",
-            "command",
-            "roles",
-            "unrestricted"
+            "type"
           ],
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "exposedToBrowser": {
-              "type": "boolean"
+            "detail": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AccessRuleDetail"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "$ref": "#/$defs/RuleScope"
+            },
+            "strength": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Strength"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
-              "const": "envVar",
+              "const": "accessRule",
               "type": "string"
             }
           },
           "required": [
             "type",
-            "exposedToBrowser"
+            "scope"
           ],
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "masked": {
+            "type": {
+              "const": "principal",
               "type": "string"
-            },
-            "secretKind": {
-              "$ref": "#/$defs/SecretKind"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "$ref": "#/$defs/CredentialDetail"
             },
             "type": {
-              "const": "secret",
+              "const": "credential",
               "type": "string"
             }
           },
           "required": [
             "type",
-            "secretKind",
-            "masked"
+            "detail"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ConfigDetail"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "const": "config",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         }
       ]
+    },
+    "Origin": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/InputKind"
+          },
+          "type": "array"
+        },
+        "rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "engine",
+        "inputs"
+      ],
+      "type": "object"
     },
     "PolicyCommand": {
       "enum": [
@@ -321,6 +697,28 @@
       ],
       "type": "string"
     },
+    "RuleScope": {
+      "enum": [
+        "open",
+        "conditional",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Runtime": {
+      "enum": [
+        "browser",
+        "server",
+        "edge",
+        "mobile",
+        "native",
+        "firmware",
+        "database",
+        "build",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "SecretKind": {
       "enum": [
         "supabaseServiceRoleKey",
@@ -342,6 +740,14 @@
         "medium",
         "low",
         "info"
+      ],
+      "type": "string"
+    },
+    "Strength": {
+      "enum": [
+        "verified",
+        "weak",
+        "unknown"
       ],
       "type": "string"
     },
@@ -398,6 +804,12 @@
             "null"
           ]
         },
+        "ecosystems": {
+          "items": {
+            "$ref": "#/$defs/Ecosystem"
+          },
+          "type": "array"
+        },
         "filesExcluded": {
           "format": "uint32",
           "minimum": 0,
@@ -413,6 +825,18 @@
           "minimum": 0,
           "type": "integer"
         },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/Input"
+          },
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "$ref": "#/$defs/Limitation"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
         },
@@ -425,7 +849,10 @@
         "filesScanned",
         "filesSkipped",
         "filesExcluded",
-        "truncated"
+        "truncated",
+        "ecosystems",
+        "inputs",
+        "limitations"
       ],
       "type": "object"
     },
@@ -444,6 +871,26 @@
         "version"
       ],
       "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "file",
+        "function",
+        "image"
+      ],
+      "type": "string"
+    },
+    "Zone": {
+      "enum": [
+        "client",
+        "server",
+        "database",
+        "device",
+        "buildTime",
+        "thirdParty",
+        "unknown"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

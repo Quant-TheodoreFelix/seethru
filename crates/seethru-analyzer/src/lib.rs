@@ -16,14 +16,15 @@ use std::fmt;
 use std::path::Path;
 
 use seethru_core::{
-    EdgeKind, FileRole, Location, Node, NodeId, NodeKind, RuleId, ScanReport, Severity, TargetInfo,
+    Confidence, CredentialDetail, Ecosystem, EdgeKind, EvidenceStep, Input, LimitationCode,
+    Location, Node, NodeId, NodeKind, RuleId, ScanReport, Severity, TargetInfo, Zone,
 };
 
-use classify::{Class, Content, ProjectHints};
+use classify::{Class, Content, FileRole, ProjectHints};
 use config::Config;
-use graph::Graph;
+use graph::{Graph, Verdict, file_location, file_step, step};
 use resolve::{ConfigText, Resolver};
-use roles::Module;
+use roles::{Assigned, Module};
 use supabase::Migrations;
 
 pub use config::CONFIG_FILE;
@@ -116,14 +117,21 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             && let Some(mut facts) = script::analyze(&entry.rel_path, &text)
         {
             uses_supabase |= facts.uses_supabase;
+            let lines = Lines::new(&text);
             modules.push(Module {
                 rel_path: entry.rel_path.clone(),
                 role: class.role,
                 directive: facts.directive,
                 server_only: facts.server_only,
-                imports: std::mem::take(&mut facts.imports),
+                imports: std::mem::take(&mut facts.imports)
+                    .into_iter()
+                    .map(|import| roles::Import {
+                        specifier: import.specifier,
+                        location: lines.location(&entry.rel_path, import.offset),
+                    })
+                    .collect(),
             });
-            scripts.push(ScriptRecord::new(&entry.rel_path, &text, facts));
+            scripts.push(ScriptRecord::new(&entry.rel_path, &lines, facts));
         }
         if let Some(record) = SecretRecord::new(&entry.rel_path, class, &text) {
             secret_records.push(record);
@@ -133,8 +141,12 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let module_paths: BTreeSet<String> = modules.iter().map(|m| m.rel_path.clone()).collect();
     let resolver = Resolver::new(&module_paths, hints.roots(), &configs);
     let roles = roles::assign(&modules, &resolver);
-    let role_of =
-        |rel_path: &str, fallback: FileRole| roles.get(rel_path).copied().unwrap_or(fallback);
+    let assigned_of = |rel_path: &str, fallback: FileRole| {
+        roles
+            .get(rel_path)
+            .cloned()
+            .unwrap_or_else(|| Assigned::by_path(fallback))
+    };
 
     let mut first_use: BTreeMap<String, Location> = BTreeMap::new();
     if uses_supabase {
@@ -152,24 +164,50 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut graph = Graph::default();
     migrations.emit(&mut graph);
     for record in scripts {
-        let role = role_of(&record.rel_path, FileRole::UnknownCode);
-        record.emit(&mut graph, role);
+        let assigned = assigned_of(&record.rel_path, FileRole::UnknownCode);
+        record.emit(&mut graph, &assigned);
     }
     for (table, location) in first_use {
         let table_id = NodeId::new(format!("table:public.{table}"));
         if graph.table_rls(&table_id) == Some(seethru_core::RlsStatus::Unknown) {
+            let evidence = vec![
+                file_step(&location.path, None, file_location(&location.path)),
+                step(
+                    &table,
+                    Some(EdgeKind::Reads),
+                    Some(table_id.clone()),
+                    Some(location.clone()),
+                ),
+            ];
             graph.add_finding(
-                RuleId::SupabaseTableSchemaMissing,
-                Severity::Info,
+                Verdict {
+                    rule: RuleId::SupabaseTableSchemaMissing,
+                    severity: Severity::Info,
+                    confidence: Confidence::Review,
+                },
                 rules::table_schema_missing(&table),
                 table_id,
                 Some(location),
+                evidence,
             );
         }
     }
     for record in secret_records {
-        let role = role_of(&record.rel_path, record.class.role);
-        record.emit(&mut graph, role);
+        let assigned = assigned_of(&record.rel_path, record.class.role);
+        record.emit(&mut graph, &assigned);
+    }
+
+    let mut ecosystems = hints.ecosystems();
+    if uses_supabase {
+        ecosystems.push(Ecosystem::Supabase);
+    }
+    ecosystems.sort();
+    let mut limitations = Vec::new();
+    if !modules.is_empty() {
+        limitations.push(rules::limitation(LimitationCode::BuildOutputNotRead));
+    }
+    if uses_supabase {
+        limitations.push(rules::limitation(LimitationCode::DashboardPoliciesUnseen));
     }
 
     let name = root
@@ -184,6 +222,9 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         files_excluded: walked.excluded,
         truncated: walked.truncated,
         config_file: config.as_ref().map(|_| CONFIG_FILE.to_owned()),
+        ecosystems,
+        inputs: vec![Input::Source {}],
+        limitations,
     });
     if let Some(config) = &config {
         for finding in &mut report.findings {
@@ -194,15 +235,63 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     Ok(report)
 }
 
-pub(crate) fn position(text: &str, offset: usize) -> (u32, u32) {
-    let before = &text[..offset.min(text.len())];
-    let line = before.matches('\n').count().saturating_add(1);
-    let line_start = before.rfind('\n').map_or(0, |n| n + 1);
-    let column = before[line_start..].chars().count().saturating_add(1);
-    (
-        u32::try_from(line).unwrap_or(u32::MAX),
-        u32::try_from(column).unwrap_or(u32::MAX),
-    )
+pub(crate) struct Lines<'a> {
+    text: &'a str,
+    starts: Vec<usize>,
+}
+
+impl<'a> Lines<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        let starts = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(index, _)| index + 1))
+            .collect();
+        Self { text, starts }
+    }
+
+    pub(crate) fn position(&self, offset: usize) -> (u32, u32) {
+        let offset = offset.min(self.text.len());
+        let line = self.starts.partition_point(|start| *start <= offset);
+        let line_start = line
+            .checked_sub(1)
+            .and_then(|index| self.starts.get(index))
+            .copied()
+            .unwrap_or(0);
+        let column = self
+            .text
+            .get(line_start..offset)
+            .map_or(0, |span| span.chars().count())
+            .saturating_add(1);
+        (
+            u32::try_from(line.max(1)).unwrap_or(u32::MAX),
+            u32::try_from(column).unwrap_or(u32::MAX),
+        )
+    }
+
+    pub(crate) fn location(&self, rel_path: &str, offset: usize) -> Location {
+        let (line, column) = self.position(offset);
+        Location {
+            path: rel_path.to_owned(),
+            line,
+            column,
+        }
+    }
+}
+
+fn file_steps(rel_path: &str, assigned: &Assigned) -> Vec<EvidenceStep> {
+    let mut steps = Vec::with_capacity(assigned.via.len() + 1);
+    let mut via = None;
+    let mut from: Option<&Location> = None;
+    for hop in &assigned.via {
+        let at = from
+            .cloned()
+            .unwrap_or_else(|| file_location(&hop.rel_path));
+        steps.push(file_step(&hop.rel_path, via, at));
+        via = Some(EdgeKind::Imports);
+        from = Some(&hop.location);
+    }
+    let at = from.cloned().unwrap_or_else(|| file_location(rel_path));
+    steps.push(file_step(rel_path, via, at));
+    steps
 }
 
 fn is_resolver_config(rel_path: &str, class: Class) -> bool {
@@ -234,6 +323,7 @@ impl SecretRecord {
         }
         let real_env_file =
             class.content == Content::Env && !env::is_template_file(classify::file_name(rel_path));
+        let lines = Lines::new(text);
         let mut hits = Vec::new();
         for hit in found {
             let public_var = if real_env_file {
@@ -244,15 +334,10 @@ impl SecretRecord {
             } else {
                 None
             };
-            let (line, column) = position(text, hit.offset);
             hits.push(SecretHit {
                 kind: hit.kind,
                 masked: hit.masked,
-                location: Location {
-                    path: rel_path.to_owned(),
-                    line,
-                    column,
-                },
+                location: lines.location(rel_path, hit.offset),
                 public_var,
             });
         }
@@ -264,49 +349,91 @@ impl SecretRecord {
         })
     }
 
-    fn emit(self, graph: &mut Graph, role: FileRole) {
+    fn emit(self, graph: &mut Graph, assigned: &Assigned) {
         let rel_path = self.rel_path.as_str();
+        let role = assigned.role;
+        let delivered_as_is = role == FileRole::BuildOutput || self.class.served_as_is;
         let mut ordinals: BTreeMap<seethru_core::SecretKind, u32> = BTreeMap::new();
         for hit in self.hits {
             let ordinal = ordinals.entry(hit.kind).or_insert(0);
             *ordinal = ordinal.saturating_add(1);
             let secret_id = format!("secret:{rel_path}:{}:{ordinal}", hit.kind.as_str());
-            let (rule, severity, explanation) = match (&hit.public_var, self.real_env_file) {
+            let (verdict, explanation) = match (&hit.public_var, self.real_env_file) {
                 (Some(var), true) => (
-                    RuleId::SecretInPublicEnvVar,
-                    Severity::Critical,
+                    Verdict {
+                        rule: RuleId::SecretInPublicEnvVar,
+                        severity: Severity::Critical,
+                        confidence: Confidence::Certain,
+                    },
                     rules::secret_in_public_env(hit.kind, var),
                 ),
                 _ if role.runs_in_browser() => (
-                    RuleId::SecretInBrowserCode,
-                    Severity::Critical,
+                    Verdict {
+                        rule: RuleId::SecretInBrowserCode,
+                        severity: Severity::Critical,
+                        confidence: if delivered_as_is {
+                            Confidence::Certain
+                        } else {
+                            Confidence::Likely
+                        },
+                    },
                     rules::secret_in_browser(hit.kind, rel_path),
                 ),
                 _ => (
-                    RuleId::SecretInSourceCode,
-                    Severity::High,
+                    Verdict {
+                        rule: RuleId::SecretInSourceCode,
+                        severity: Severity::High,
+                        confidence: Confidence::Certain,
+                    },
                     rules::secret_in_source(hit.kind, rel_path),
                 ),
             };
-            let file_id = graph.add_file(rel_path, role);
+            let file_id = graph.add_file(rel_path, role, assigned.basis);
+            let mut evidence = file_steps(rel_path, assigned);
+            let zone = match &hit.public_var {
+                Some(var) if env::is_public(var) => Zone::Client,
+                Some(_) => Zone::Server,
+                None => role.runtime().zone(),
+            };
             let secret_id = graph.add_node(Node {
                 id: NodeId::new(secret_id),
                 label: hit.masked.as_str().to_owned(),
-                kind: NodeKind::Secret {
-                    secret_kind: hit.kind,
-                    masked: hit.masked,
+                kind: NodeKind::Credential {
+                    detail: CredentialDetail::Secret {
+                        secret_kind: hit.kind,
+                        masked: hit.masked.clone(),
+                    },
                 },
+                zone,
                 location: Some(hit.location.clone()),
             });
             match hit.public_var {
                 Some(var) => {
                     let env_id = graph.add_env_var(&var);
+                    evidence.push(step(
+                        &var,
+                        Some(EdgeKind::Defines),
+                        Some(env_id.clone()),
+                        Some(hit.location.clone()),
+                    ));
                     graph.add_edge(file_id, env_id.clone(), EdgeKind::Defines);
                     graph.add_edge(env_id, secret_id.clone(), EdgeKind::Contains);
                 }
                 None => graph.add_edge(file_id, secret_id.clone(), EdgeKind::Contains),
             }
-            graph.add_finding(rule, severity, explanation, secret_id, Some(hit.location));
+            evidence.push(step(
+                hit.masked.as_str(),
+                Some(EdgeKind::Contains),
+                Some(secret_id.clone()),
+                Some(hit.location.clone()),
+            ));
+            graph.add_finding(
+                verdict,
+                explanation,
+                secret_id,
+                Some(hit.location),
+                evidence,
+            );
         }
     }
 }
@@ -318,15 +445,8 @@ struct ScriptRecord {
 }
 
 impl ScriptRecord {
-    fn new(rel_path: &str, text: &str, facts: script::Facts) -> Self {
-        let at = |offset: usize| {
-            let (line, column) = position(text, offset);
-            Location {
-                path: rel_path.to_owned(),
-                line,
-                column,
-            }
-        };
+    fn new(rel_path: &str, lines: &Lines<'_>, facts: script::Facts) -> Self {
+        let at = |offset: usize| lines.location(rel_path, offset);
         Self {
             rel_path: rel_path.to_owned(),
             env_reads: facts
@@ -348,34 +468,46 @@ impl ScriptRecord {
         }
     }
 
-    fn emit(self, graph: &mut Graph, role: FileRole) {
+    fn emit(self, graph: &mut Graph, assigned: &Assigned) {
         if self.env_reads.is_empty() && self.queries.is_empty() {
             return;
         }
-        let file_id = graph.add_file(&self.rel_path, role);
+        let role = assigned.role;
+        let file_id = graph.add_file(&self.rel_path, role, assigned.basis);
         for (table, access, _) in &self.queries {
             let table_id = graph.add_table("public", table);
             let kind = match access {
-                script::Access::Read => EdgeKind::Queries,
+                script::Access::Read => EdgeKind::Reads,
                 script::Access::Write => EdgeKind::Writes,
             };
             graph.add_edge(file_id.clone(), table_id, kind);
         }
         for (name, location) in self.env_reads {
             let env_id = graph.add_env_var(&name);
-            graph.add_edge(file_id.clone(), env_id.clone(), EdgeKind::Reads);
+            graph.add_edge(file_id.clone(), env_id.clone(), EdgeKind::UsesConfig);
             let exposed_prefix = env::public_prefix(&name);
             if let (true, true, Some(prefix)) = (
                 role.runs_in_browser(),
                 script::is_service_role_env(&name),
                 exposed_prefix,
             ) {
+                let mut evidence = file_steps(&self.rel_path, assigned);
+                evidence.push(step(
+                    &name,
+                    Some(EdgeKind::UsesConfig),
+                    Some(env_id.clone()),
+                    Some(location.clone()),
+                ));
                 graph.add_finding(
-                    RuleId::SupabaseServiceRoleInBrowser,
-                    Severity::Critical,
+                    Verdict {
+                        rule: RuleId::SupabaseServiceRoleInBrowser,
+                        severity: Severity::Critical,
+                        confidence: Confidence::Likely,
+                    },
                     rules::service_role_in_browser(&name, prefix),
                     env_id,
                     Some(location),
+                    evidence,
                 );
             }
         }

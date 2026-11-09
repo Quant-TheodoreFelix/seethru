@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use seethru_core::FileRole;
+use seethru_core::{Artifact, Ecosystem, Runtime};
 
 const SCRIPT_EXTENSIONS: &[&str] = &["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"];
 
@@ -76,10 +76,51 @@ pub(crate) enum Content {
     Text,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum FileRole {
+    BrowserCode,
+    ServerCode,
+    EdgeFunction,
+    UnknownCode,
+    Migration,
+    EnvFile,
+    BuildOutput,
+    Other,
+}
+
+impl FileRole {
+    pub(crate) fn runs_in_browser(self) -> bool {
+        matches!(self, Self::BrowserCode | Self::BuildOutput)
+    }
+
+    pub(crate) fn runtime(self) -> Runtime {
+        match self {
+            Self::BrowserCode | Self::BuildOutput => Runtime::Browser,
+            Self::ServerCode => Runtime::Server,
+            Self::EdgeFunction => Runtime::Edge,
+            Self::Migration => Runtime::Database,
+            Self::UnknownCode | Self::EnvFile | Self::Other => Runtime::Unknown,
+        }
+    }
+
+    pub(crate) fn artifact(self) -> Artifact {
+        match self {
+            Self::BrowserCode | Self::ServerCode | Self::EdgeFunction | Self::UnknownCode => {
+                Artifact::Source
+            }
+            Self::Migration => Artifact::Migration,
+            Self::EnvFile => Artifact::Config,
+            Self::BuildOutput => Artifact::BuildOutput,
+            Self::Other => Artifact::Other,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Class {
     pub role: FileRole,
     pub content: Content,
+    pub served_as_is: bool,
 }
 
 #[derive(Default)]
@@ -108,17 +149,34 @@ impl ProjectHints {
 
     pub(crate) fn classify(&self, rel_path: &str) -> Option<Class> {
         let content = content_of(file_name(rel_path))?;
+        let mut served_as_is = false;
         let role = match content {
             Content::Sql => FileRole::Migration,
             Content::Env => FileRole::EnvFile,
             Content::Script | Content::Text if is_build_output(rel_path) => FileRole::BuildOutput,
             Content::Script | Content::Text if self.is_served_as_is(rel_path) => {
+                served_as_is = true;
                 FileRole::BrowserCode
             }
             Content::Script => self.script_role(rel_path),
             Content::Text => FileRole::Other,
         };
-        Some(Class { role, content })
+        Some(Class {
+            role,
+            content,
+            served_as_is,
+        })
+    }
+
+    pub(crate) fn ecosystems(&self) -> Vec<Ecosystem> {
+        let mut found = Vec::new();
+        if !self.next_roots.is_empty() {
+            found.push(Ecosystem::Next);
+        }
+        if !self.vite_roots.is_empty() {
+            found.push(Ecosystem::Vite);
+        }
+        found
     }
 
     pub(crate) fn roots(&self) -> Vec<String> {
@@ -262,8 +320,7 @@ pub(crate) fn file_name(rel_path: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Content, ProjectHints};
-    use seethru_core::FileRole;
+    use super::{Content, FileRole, ProjectHints};
 
     fn role(hints: &ProjectHints, path: &str) -> Option<FileRole> {
         hints.classify(path).map(|class| class.role)

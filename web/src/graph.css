@@ -68,8 +68,8 @@
   text-overflow: ellipsis;
 }
 
-.node-envVar .node-label,
-.node-secret .node-label {
+.node-config .node-label,
+.node-credential .node-label {
   font-weight: 400;
   font-style: italic;
   font-synthesis-style: none;
@@ -100,8 +100,8 @@
   stroke-width: 2.75;
 }
 
-.react-flow__edge.edge-reads .react-flow__edge-path,
-.legend-line.edge-reads {
+.react-flow__edge.edge-usesConfig .react-flow__edge-path,
+.legend-line.edge-usesConfig {
   stroke-dasharray: 1.5 4;
   stroke-linecap: round;
 }

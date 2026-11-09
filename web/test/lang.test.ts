@@ -50,10 +50,27 @@ test("both languages fill every message", () => {
 });
 
 test("labels graph nodes in the chosen language", () => {
-  const policy = { type: "policy", command: "update", roles: ["authenticated"], unrestricted: true } as const;
+  const policy = {
+    type: "accessRule",
+    scope: "open",
+    detail: { type: "postgresPolicy", command: "update", roles: ["authenticated"] },
+  } as const;
   assert.equal(kindLabel(policy, MESSAGES.en), "Policy · Update · authenticated");
   assert.equal(kindLabel(policy, MESSAGES.ko), "정책 · 수정 · authenticated");
-  const table = { type: "table", schema: "public", rls: "disabled" } as const;
+  const table = { type: "dataStore", detail: { type: "postgresTable", schema: "public", rls: "disabled" } } as const;
   assert.equal(kindLabel(table, MESSAGES.en), "Table · RLS off");
   assert.equal(kindLabel(table, MESSAGES.ko), "테이블 · RLS 꺼짐");
+  const component = (runtime: "browser" | "server" | "edge" | "unknown", artifact: "source" | "migration" | "config" | "buildOutput" | "other") =>
+    kindLabel({ type: "component", runtime, artifact, unit: "file", basis: "path" }, MESSAGES.en);
+  assert.equal(component("browser", "source"), "Browser code");
+  assert.equal(component("server", "source"), "Server code");
+  assert.equal(component("edge", "source"), "Edge Function");
+  assert.equal(component("unknown", "source"), "Code");
+  assert.equal(component("unknown", "migration"), "Migration");
+  assert.equal(component("unknown", "config"), "Env file");
+  assert.equal(component("browser", "buildOutput"), "Build output");
+  assert.equal(component("unknown", "other"), "File");
+  const env = { type: "config", detail: { type: "envVar", exposedToClient: true } } as const;
+  assert.equal(kindLabel(env, MESSAGES.en), "Env variable · public in browser");
+  assert.equal(kindLabel({ type: "principal" }, MESSAGES.ko), "권한 주체");
 });

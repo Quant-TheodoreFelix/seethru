@@ -1,10 +1,26 @@
 import type { Lang } from "./lang";
-import type { EdgeKind, FileRole, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity } from "./model";
+import type { EdgeKind, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity } from "./model";
 import type { Theme } from "./theme";
+
+export type ComponentLabel =
+  | "browserCode"
+  | "serverCode"
+  | "edgeFunction"
+  | "code"
+  | "mobileCode"
+  | "nativeCode"
+  | "firmware"
+  | "databaseCode"
+  | "buildScript"
+  | "migration"
+  | "envFile"
+  | "buildOutput"
+  | "binary"
+  | "file";
 
 export interface Messages {
   severity: Record<Severity, string>;
-  fileRole: Record<FileRole, string>;
+  component: Record<ComponentLabel, string>;
   command: Record<PolicyCommand, string>;
   secret: Record<SecretKind, string>;
   edge: Record<EdgeKind, string>;
@@ -16,6 +32,12 @@ export interface Messages {
   policy: string;
   envVar: string;
   publicInBrowser: string;
+  entryPoint: string;
+  dataStore: string;
+  accessRule: string;
+  principal: string;
+  config: string;
+  service: string;
   scanned: (target: ScanReport["target"]) => string;
   colorTheme: string;
   languageSwitch: string;
@@ -46,15 +68,21 @@ const LANGUAGE: Record<Lang, string> = { en: "EN", ko: "KO" };
 
 const en: Messages = {
   severity: { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" },
-  fileRole: {
+  component: {
     browserCode: "Browser code",
     serverCode: "Server code",
     edgeFunction: "Edge Function",
-    unknownCode: "Code",
+    code: "Code",
+    mobileCode: "Mobile code",
+    nativeCode: "Native code",
+    firmware: "Firmware",
+    databaseCode: "Database code",
+    buildScript: "Build script",
     migration: "Migration",
     envFile: "Env file",
     buildOutput: "Build output",
-    other: "File",
+    binary: "Binary",
+    file: "File",
   },
   command: { all: "All", select: "Select", insert: "Insert", update: "Update", delete: "Delete" },
   secret: {
@@ -69,12 +97,20 @@ const en: Messages = {
     privateKey: "Private key",
   },
   edge: {
+    imports: "imports",
+    calls: "calls",
+    builtFrom: "built from",
+    invokes: "invokes",
+    reads: "reads",
+    writes: "writes",
+    usesConfig: "uses config",
     defines: "defines",
     guardedBy: "guarded by",
-    queries: "queries",
-    writes: "writes",
-    reads: "reads",
+    actsAs: "acts as",
+    appliesTo: "applies to",
     contains: "contains",
+    unlocks: "unlocks",
+    connectsTo: "connects to",
   },
   theme: { light: "Light", dark: "Dark" },
   language: LANGUAGE,
@@ -84,6 +120,12 @@ const en: Messages = {
   policy: "Policy",
   envVar: "Env variable",
   publicInBrowser: "public in browser",
+  entryPoint: "Entry point",
+  dataStore: "Data store",
+  accessRule: "Access rule",
+  principal: "Principal",
+  config: "Config",
+  service: "Service",
   scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
     [
       `${filesScanned} ${filesScanned === 1 ? "file" : "files"} scanned`,
@@ -119,15 +161,21 @@ const en: Messages = {
 
 const ko: Messages = {
   severity: { critical: "치명적", high: "높음", medium: "중간", low: "낮음", info: "정보" },
-  fileRole: {
+  component: {
     browserCode: "브라우저 코드",
     serverCode: "서버 코드",
     edgeFunction: "Edge Function",
-    unknownCode: "코드",
+    code: "코드",
+    mobileCode: "모바일 코드",
+    nativeCode: "네이티브 코드",
+    firmware: "펌웨어",
+    databaseCode: "DB 코드",
+    buildScript: "빌드 스크립트",
     migration: "DB 마이그레이션",
     envFile: "환경변수 파일",
     buildOutput: "빌드 결과물",
-    other: "파일",
+    binary: "바이너리",
+    file: "파일",
   },
   command: { all: "모든 작업", select: "읽기", insert: "추가", update: "수정", delete: "삭제" },
   secret: {
@@ -142,12 +190,20 @@ const ko: Messages = {
     privateKey: "개인 키",
   },
   edge: {
+    imports: "가져옴",
+    calls: "호출",
+    builtFrom: "빌드 원본",
+    invokes: "실행",
+    reads: "조회",
+    writes: "쓰기",
+    usesConfig: "참조",
     defines: "정의",
     guardedBy: "정책 적용",
-    queries: "조회",
-    writes: "쓰기",
-    reads: "참조",
+    actsAs: "권한으로 동작",
+    appliesTo: "적용 대상",
     contains: "포함",
+    unlocks: "권한 획득",
+    connectsTo: "연결",
   },
   theme: { light: "라이트", dark: "다크" },
   language: LANGUAGE,
@@ -157,6 +213,12 @@ const ko: Messages = {
   policy: "정책",
   envVar: "환경변수",
   publicInBrowser: "브라우저에 공개",
+  entryPoint: "진입점",
+  dataStore: "데이터 저장소",
+  accessRule: "접근 규칙",
+  principal: "권한 주체",
+  config: "설정",
+  service: "바깥 서비스",
   scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
     [
       `파일 ${filesScanned}개 검사`,
@@ -192,17 +254,61 @@ const ko: Messages = {
 
 export const MESSAGES: Record<Lang, Messages> = { en, ko };
 
+function componentLabel(kind: Extract<NodeKind, { type: "component" }>): ComponentLabel {
+  switch (kind.artifact) {
+    case "migration":
+      return "migration";
+    case "config":
+      return "envFile";
+    case "buildOutput":
+      return "buildOutput";
+    case "binary":
+      return "binary";
+    case "other":
+      return "file";
+    case "source":
+      switch (kind.runtime) {
+        case "browser":
+          return "browserCode";
+        case "server":
+          return "serverCode";
+        case "edge":
+          return "edgeFunction";
+        case "mobile":
+          return "mobileCode";
+        case "native":
+          return "nativeCode";
+        case "firmware":
+          return "firmware";
+        case "database":
+          return "databaseCode";
+        case "build":
+          return "buildScript";
+        case "unknown":
+          return "code";
+      }
+  }
+}
+
 export function kindLabel(kind: NodeKind, m: Messages): string {
   switch (kind.type) {
-    case "file":
-      return m.fileRole[kind.role];
-    case "table":
-      return kind.rls === "enabled" ? `${m.table} · ${m.rlsOn}` : kind.rls === "disabled" ? `${m.table} · ${m.rlsOff}` : m.table;
-    case "policy":
-      return `${m.policy} · ${m.command[kind.command]} · ${kind.roles.join(", ")}`;
-    case "envVar":
-      return kind.exposedToBrowser ? `${m.envVar} · ${m.publicInBrowser}` : m.envVar;
-    case "secret":
-      return `${m.secret[kind.secretKind]} · ${kind.masked}`;
+    case "component":
+      return m.component[componentLabel(kind)];
+    case "entryPoint":
+      return m.entryPoint;
+    case "dataStore": {
+      const rls = kind.detail?.rls;
+      return rls === "enabled" ? `${m.table} · ${m.rlsOn}` : rls === "disabled" ? `${m.table} · ${m.rlsOff}` : kind.detail ? m.table : m.dataStore;
+    }
+    case "accessRule":
+      return kind.detail ? `${m.policy} · ${m.command[kind.detail.command]} · ${kind.detail.roles.join(", ")}` : m.accessRule;
+    case "principal":
+      return m.principal;
+    case "credential":
+      return `${m.secret[kind.detail.secretKind]} · ${kind.detail.masked}`;
+    case "config":
+      return kind.detail ? (kind.detail.exposedToClient ? `${m.envVar} · ${m.publicInBrowser}` : m.envVar) : m.config;
+    case "service":
+      return m.service;
   }
 }

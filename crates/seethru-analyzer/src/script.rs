@@ -54,12 +54,18 @@ pub(crate) struct TableQuery {
     pub offset: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Import {
+    pub specifier: String,
+    pub offset: usize,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Facts {
     pub directive: Option<Directive>,
     pub server_only: bool,
     pub uses_supabase: bool,
-    pub imports: Vec<String>,
+    pub imports: Vec<Import>,
     pub env_reads: Vec<EnvRead>,
     pub queries: Vec<TableQuery>,
 }
@@ -118,16 +124,23 @@ struct Collector {
 }
 
 impl Collector {
-    fn import(&mut self, specifier: &str) {
+    fn import(&mut self, specifier: &str, offset: u32) {
         if specifier.starts_with(SUPABASE_PACKAGES) {
             self.facts.uses_supabase = true;
         }
         if specifier == SERVER_ONLY_MODULE {
             self.facts.server_only = true;
         } else if self.facts.imports.len() < MAX_IMPORTS
-            && !self.facts.imports.iter().any(|seen| seen == specifier)
+            && !self
+                .facts
+                .imports
+                .iter()
+                .any(|seen| seen.specifier == specifier)
         {
-            self.facts.imports.push(specifier.to_owned());
+            self.facts.imports.push(Import {
+                specifier: specifier.to_owned(),
+                offset: offset as usize,
+            });
         }
     }
 
@@ -183,7 +196,7 @@ impl<'a> Visit<'a> for Collector {
         if !it.import_kind.is_type()
             && let Some(specifier) = it.source.value.as_str()
         {
-            self.import(specifier);
+            self.import(specifier, it.span.start);
         }
     }
 
@@ -191,7 +204,7 @@ impl<'a> Visit<'a> for Collector {
         if !it.export_kind.is_type()
             && let Some(specifier) = it.source.value.as_str()
         {
-            self.import(specifier);
+            self.import(specifier, it.span.start);
         }
     }
 
@@ -199,13 +212,13 @@ impl<'a> Visit<'a> for Collector {
         if !it.export_kind.is_type()
             && let Some(specifier) = it.source.value.as_str()
         {
-            self.import(specifier);
+            self.import(specifier, it.span.start);
         }
     }
 
     fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {
         if let Some(specifier) = literal_text(&it.source) {
-            self.import(specifier);
+            self.import(specifier, it.span.start);
         }
         walk::walk_import_expression(self, it);
     }
@@ -231,7 +244,7 @@ impl<'a> Visit<'a> for Collector {
             && callee.name.as_str() == "require"
             && let Some(specifier) = first_literal(&it.arguments)
         {
-            self.import(specifier);
+            self.import(specifier, it.span.start);
         }
         if let Expression::StaticMemberExpression(callee) = it.callee.get_inner_expression() {
             let method = callee.property.name.as_str();
@@ -362,9 +375,23 @@ mod tests {
             "import { createClient } from \"@supabase/supabase-js\";",
         );
         assert!(supabase.is_some_and(|facts| facts.uses_supabase));
+        let specifiers: Vec<&str> = facts
+            .imports
+            .iter()
+            .map(|import| import.specifier.as_str())
+            .collect();
         assert_eq!(
-            facts.imports,
+            specifiers,
             vec!["react", "./a", "@/c", "../e", "./f", "./g"]
+        );
+        let offsets: Vec<usize> = facts.imports.iter().map(|import| import.offset).collect();
+        assert!(
+            offsets.windows(2).all(|pair| pair[0] < pair[1]),
+            "{offsets:?}"
+        );
+        assert_eq!(
+            source.get(offsets[1]..).and_then(|rest| rest.get(..6)),
+            Some("import")
         );
     }
 

@@ -1,4 +1,4 @@
-use seethru_core::{Lang, LocalizedText, PolicyCommand, SecretKind};
+use seethru_core::{Lang, Limitation, LimitationCode, LocalizedText, PolicyCommand, SecretKind};
 
 const MAX_LABEL_CHARS: usize = 80;
 
@@ -312,6 +312,26 @@ pub(crate) fn secret_in_source(kind: SecretKind, file: &str) -> Text {
             "새 키는 커밋하지 않는 환경변수 파일이나 배포 환경의 비밀 설정에 넣으세요.",
         ],
     )
+}
+
+pub(crate) fn limitation(code: LimitationCode) -> Limitation {
+    let (en, ko) = match code {
+        LimitationCode::BuildOutputNotRead => (
+            "No build output was read, so whether a file reaches the browser is judged from folder names, `\"use client\"` and imports.",
+            "빌드 결과물을 읽지 않았기 때문에, 파일이 브라우저로 가는지는 폴더 이름, `\"use client\"`, import로 판단했어요.",
+        ),
+        LimitationCode::DashboardPoliciesUnseen => (
+            "Tables and policies made in the Supabase dashboard are not in this repo, so they were not checked.",
+            "Supabase 대시보드에서 만든 테이블과 정책은 저장소에 없어서 확인하지 못했어요.",
+        ),
+    };
+    Limitation {
+        code,
+        text: LocalizedText {
+            en: en.to_owned(),
+            ko: ko.to_owned(),
+        },
+    }
 }
 
 #[cfg(test)]

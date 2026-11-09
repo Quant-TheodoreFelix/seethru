@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use seethru_core::{
-    EdgeKind, Finding, Lang, LocalizedText, Location, Node, NodeKind, PolicyCommand, RuleId,
-    ScanReport, SecretKind,
+    AccessRuleDetail, CredentialDetail, DataStoreDetail, EdgeKind, Finding, Lang, LocalizedText,
+    Location, Node, NodeKind, PolicyCommand, RuleId, ScanReport, SecretKind,
 };
 
 const MAX_NAME_CHARS: usize = 120;
@@ -35,13 +35,25 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
         .map(|location| place(location, lang))
         .unwrap_or_default();
     let body = match (finding.rule, node.map(|node| &node.kind)) {
-        (RuleId::SupabaseRlsDisabled, Some(NodeKind::Table { schema, .. })) => {
-            rls_disabled(report, finding, schema, label, &place, lang)
-        }
-        (RuleId::SupabaseTableSchemaMissing, Some(NodeKind::Table { schema, .. })) => {
-            table_schema_missing(report, finding, schema, label, &place, lang)
-        }
-        (RuleId::SupabasePolicyUnrestricted, Some(NodeKind::Policy { command, roles, .. })) => {
+        (
+            RuleId::SupabaseRlsDisabled,
+            Some(NodeKind::DataStore {
+                detail: Some(DataStoreDetail::PostgresTable { schema, .. }),
+            }),
+        ) => rls_disabled(report, finding, schema, label, &place, lang),
+        (
+            RuleId::SupabaseTableSchemaMissing,
+            Some(NodeKind::DataStore {
+                detail: Some(DataStoreDetail::PostgresTable { schema, .. }),
+            }),
+        ) => table_schema_missing(report, finding, schema, label, &place, lang),
+        (
+            RuleId::SupabasePolicyUnrestricted,
+            Some(NodeKind::AccessRule {
+                detail: Some(AccessRuleDetail::PostgresPolicy { command, roles }),
+                ..
+            }),
+        ) => {
             let table = table_of_policy(report, finding).unwrap_or_default();
             let roles = roles
                 .iter()
@@ -51,12 +63,14 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             policy_unrestricted(&table, &clean(label), *command, &roles, &place, lang)
         }
         (RuleId::SupabaseServiceRoleInBrowser, Some(_)) => {
-            let readers = related_files(report, finding, &[EdgeKind::Reads], lang);
+            let readers = related_files(report, finding, &[EdgeKind::UsesConfig], lang);
             service_role_in_browser(&clean(label), &place, &readers, lang)
         }
         (
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
-            Some(NodeKind::Secret { secret_kind, .. }),
+            Some(NodeKind::Credential {
+                detail: CredentialDetail::Secret { secret_kind, .. },
+            }),
         ) => secret(finding.rule, *secret_kind, &place, lang),
         _ => format!("{}{place}", clean(finding.title.get(lang))),
     };
@@ -77,12 +91,7 @@ fn rls_disabled(
 ) -> String {
     let name = label.rsplit('.').next().unwrap_or(label);
     let table = format!("{}.{}", clean(schema), clean(name));
-    let users = related_files(
-        report,
-        finding,
-        &[EdgeKind::Queries, EdgeKind::Writes],
-        lang,
-    );
+    let users = related_files(report, finding, &[EdgeKind::Reads, EdgeKind::Writes], lang);
     match lang {
         Lang::En => format!(
             "RLS (row level security) is off for the Supabase `{table}` table, so anyone with the anon key can read and change every row.{place}{users}\n\
@@ -109,12 +118,7 @@ fn table_schema_missing(
 ) -> String {
     let name = label.rsplit('.').next().unwrap_or(label);
     let table = format!("{}.{}", clean(schema), clean(name));
-    let users = related_files(
-        report,
-        finding,
-        &[EdgeKind::Queries, EdgeKind::Writes],
-        lang,
-    );
+    let users = related_files(report, finding, &[EdgeKind::Reads, EdgeKind::Writes], lang);
     match lang {
         Lang::En => format!(
             "The Supabase `{table}` table is used in code, but no migration in this repo creates it or turns on row level security (RLS), so it is not clear whether RLS protects it.{place}{users}\n\

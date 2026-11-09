@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use seethru_core::{
-    Finding, Lang, LocalizedText, Location, MaskedSecret, Node, NodeId, NodeKind, RuleId,
-    SCHEMA_VERSION, ScanReport, SecretKind, Severity, Summary, TargetInfo, ToolInfo,
+    Confidence, CredentialDetail, DataStoreDetail, Finding, Lang, LocalizedText, Location,
+    MaskedSecret, Node, NodeId, NodeKind, Origin, RuleId, SCHEMA_VERSION, ScanReport, SecretKind,
+    Severity, Summary, TargetInfo, ToolInfo, Zone,
 };
 
 use super::{CLOSING_EN, CLOSING_KO, attach_fix_prompts, fix_prompt};
@@ -92,16 +93,20 @@ fn secret_report(label: &str) -> (ScanReport, String) {
     let node = Node {
         id: NodeId::new("secret:a"),
         label: label.to_owned(),
-        kind: NodeKind::Secret {
-            secret_kind: SecretKind::StripeSecretKey,
-            masked: masked.clone(),
+        kind: NodeKind::Credential {
+            detail: CredentialDetail::Secret {
+                secret_kind: SecretKind::StripeSecretKey,
+                masked: masked.clone(),
+            },
         },
+        zone: Zone::Server,
         location: None,
     };
     let finding = Finding {
         id: "secret-in-source-code:secret:a".to_owned(),
         rule: RuleId::SecretInSourceCode,
         severity: Severity::High,
+        confidence: Confidence::Certain,
         title: LocalizedText {
             en: "t".to_owned(),
             ko: "t".to_owned(),
@@ -116,6 +121,10 @@ fn secret_report(label: &str) -> (ScanReport, String) {
             line: 3,
             column: 7,
         }),
+        evidence: Vec::new(),
+        origin: Origin::seethru(),
+        cwe: Vec::new(),
+        proof: None,
         fix_prompt: None,
         accepted: None,
     };
@@ -132,6 +141,9 @@ fn secret_report(label: &str) -> (ScanReport, String) {
             files_excluded: 0,
             truncated: false,
             config_file: None,
+            ecosystems: Vec::new(),
+            inputs: Vec::new(),
+            limitations: Vec::new(),
         },
         summary: Summary::default(),
         nodes: vec![node],
@@ -165,16 +177,20 @@ fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
     let table = Node {
         id: NodeId::new("table:public.orders"),
         label: "orders".to_owned(),
-        kind: NodeKind::Table {
-            schema: "public".to_owned(),
-            rls: seethru_core::RlsStatus::Unknown,
+        kind: NodeKind::DataStore {
+            detail: Some(DataStoreDetail::PostgresTable {
+                schema: "public".to_owned(),
+                rls: seethru_core::RlsStatus::Unknown,
+            }),
         },
+        zone: Zone::Database,
         location: None,
     };
     let finding = Finding {
         id: "supabase-table-schema-missing:table:public.orders".to_owned(),
         rule: RuleId::SupabaseTableSchemaMissing,
         severity: Severity::Info,
+        confidence: Confidence::Review,
         title: LocalizedText::default(),
         explanation: LocalizedText::default(),
         node: table.id.clone(),
@@ -183,6 +199,10 @@ fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
             line: 3,
             column: 9,
         }),
+        evidence: Vec::new(),
+        origin: Origin::seethru(),
+        cwe: Vec::new(),
+        proof: None,
         fix_prompt: None,
         accepted: None,
     };
@@ -199,6 +219,9 @@ fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
             files_excluded: 0,
             truncated: false,
             config_file: None,
+            ecosystems: Vec::new(),
+            inputs: Vec::new(),
+            limitations: Vec::new(),
         },
         summary: Summary::default(),
         nodes: vec![table],

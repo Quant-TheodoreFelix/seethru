@@ -347,8 +347,8 @@ fn place(finding: &seethru_core::Finding) -> String {
 mod tests {
     use super::{Command, parse, print_summary};
     use seethru_core::{
-        Acceptance, Finding, Lang, LocalizedText, NodeId, RuleId, SCHEMA_VERSION, ScanReport,
-        Severity, Summary, TargetInfo, ToolInfo,
+        Acceptance, Confidence, Finding, Lang, LocalizedText, NodeId, Origin, RuleId,
+        SCHEMA_VERSION, ScanReport, Severity, Summary, TargetInfo, ToolInfo,
     };
     use std::ffi::OsString;
 
@@ -420,6 +420,7 @@ mod tests {
             id: "f".to_owned(),
             rule: RuleId::SupabaseRlsDisabled,
             severity: Severity::Critical,
+            confidence: Confidence::Certain,
             title: LocalizedText {
                 en: "RLS is off".to_owned(),
                 ko: "RLS가 꺼져 있어요".to_owned(),
@@ -427,6 +428,10 @@ mod tests {
             explanation: LocalizedText::default(),
             node: NodeId::new("table:public.todos"),
             location: None,
+            evidence: Vec::new(),
+            origin: Origin::seethru(),
+            cwe: Vec::new(),
+            proof: None,
             fix_prompt: None,
             accepted: None,
         }];
@@ -443,6 +448,9 @@ mod tests {
                 files_excluded: 0,
                 truncated: false,
                 config_file: None,
+                ecosystems: Vec::new(),
+                inputs: Vec::new(),
+                limitations: Vec::new(),
             },
             summary: Summary::from_findings(&findings),
             nodes: Vec::new(),
