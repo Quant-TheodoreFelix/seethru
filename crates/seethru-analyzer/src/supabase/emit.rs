@@ -109,6 +109,7 @@ impl Migrations {
                     name,
                     reach == Reach::Anyone,
                     policy.command,
+                    deciding_condition(policy).signed_in,
                 );
                 let mut evidence = Vec::new();
                 if let Some(table) = self.tables.get(key) {
@@ -391,33 +392,15 @@ enum Reach {
 }
 
 fn policy_open(policy: &Policy) -> bool {
-    let condition = match policy.command {
-        PolicyCommand::Insert => &policy.check,
-        PolicyCommand::Select
-        | PolicyCommand::Update
-        | PolicyCommand::Delete
-        | PolicyCommand::All => &policy.using,
-    };
-    condition.open && !condition.signed_in && condition.buckets.is_empty()
+    let condition = deciding_condition(policy);
+    condition.open && condition.buckets.is_empty()
 }
 
 fn policy_reach(policy: &Policy) -> Option<Reach> {
     if !policy.permissive || !policy_open(policy) {
         return None;
     }
-    let has = |roles: &[&str]| {
-        policy
-            .roles
-            .iter()
-            .any(|role| roles.contains(&role.as_str()))
-    };
-    if has(ANONYMOUS_ROLES) {
-        Some(Reach::Anyone)
-    } else if has(SIGNED_IN_ROLES) {
-        Some(Reach::SignedIn)
-    } else {
-        None
-    }
+    reach_of(&policy.roles, deciding_condition(policy).signed_in)
 }
 
 fn policy_severity(reach: Reach, command: PolicyCommand) -> Severity {

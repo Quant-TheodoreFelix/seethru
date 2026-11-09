@@ -188,13 +188,13 @@ fn policy_unrestricted(
     let command = command_name(command);
     match lang {
         Lang::En => format!(
-            "The `{policy}` policy on the Supabase `{table}` table (`{command}` for {roles}) has a condition that is always `true`, so every row is open.{place}\n\
+            "The `{policy}` policy on the Supabase `{table}` table (`{command}` for {roles}) has a condition that does not check whose row it is, so every row is open.{place}\n\
              1. Create a new migration file that drops this policy with `drop policy` and creates it again with a condition that lets signed-in users work only with their own rows. For example, use the owner column of the table as in `using ((select auth.uid()) = user_id)`.\n\
              2. Do not edit migration files that have already been applied.\n\
              3. If this policy shares the table with everyone on purpose, do not change it and tell me so."
         ),
         Lang::Ko => format!(
-            "Supabase `{table}` 테이블의 `{policy}` 정책(`{command}`, 대상 {roles})은 조건이 항상 참(`true`)이라서 모든 행이 열려 있어.{place}\n\
+            "Supabase `{table}` 테이블의 `{policy}` 정책(`{command}`, 대상 {roles})은 조건이 누구의 행인지 확인하지 않아서 모든 행이 열려 있어.{place}\n\
              1. 새 마이그레이션 파일을 만들어서 이 정책을 지우고(`drop policy`), 로그인한 사용자가 자기 행만 다룰 수 있는 조건으로 다시 만들어 줘. 예를 들면 `using ((select auth.uid()) = user_id)`처럼 테이블의 소유자 컬럼을 써.\n\
              2. 이미 적용된 마이그레이션 파일은 고치지 마.\n\
              3. 모두에게 공개하려고 일부러 만든 정책이라면 바꾸지 말고 그렇다고 알려 줘."

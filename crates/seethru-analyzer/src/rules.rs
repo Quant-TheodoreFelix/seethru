@@ -46,6 +46,7 @@ pub(crate) fn policy_unrestricted(
     policy: &str,
     anyone: bool,
     command: PolicyCommand,
+    login_only: bool,
 ) -> Text {
     let table = display_name(table);
     let policy = display_name(policy);
@@ -83,14 +84,24 @@ pub(crate) fn policy_unrestricted(
         },
         explanation: LocalizedText {
             en: format!(
-                "The condition of this policy is always true, so {who_en} can {what_en} in the `{table}` table. \
+                "{} so {who_en} can {what_en} in the `{table}` table. \
                  The condition should usually allow only the user's own rows, such as `auth.uid() = user_id`. \
-                 If you made this policy to share the table with everyone on purpose, you can leave it as it is."
+                 If you made this policy to share the table with everyone on purpose, you can leave it as it is.",
+                if login_only {
+                    "The condition of this policy only checks that the user is signed in,"
+                } else {
+                    "The condition of this policy is always true,"
+                }
             ),
             ko: format!(
-                "이 정책은 조건이 항상 참(true)이라서 {who_ko} `{table}` 테이블에서 {what_ko}. \
+                "{} {who_ko} `{table}` 테이블에서 {what_ko}. \
                  보통은 `auth.uid() = user_id`처럼 본인 행만 허용하는 조건이 필요해요. \
-                 모두에게 공개하려고 일부러 만든 정책이라면 그대로 두어도 괜찮아요."
+                 모두에게 공개하려고 일부러 만든 정책이라면 그대로 두어도 괜찮아요.",
+                if login_only {
+                    "이 정책은 조건이 로그인했는지만 확인해서"
+                } else {
+                    "이 정책은 조건이 항상 참(true)이라서"
+                }
             ),
         },
     }
@@ -597,7 +608,15 @@ mod tests {
         ];
         for command in COMMANDS {
             for anyone in [true, false] {
-                texts.push(policy_unrestricted("posts", "Edit posts", anyone, command));
+                for login_only in [true, false] {
+                    texts.push(policy_unrestricted(
+                        "posts",
+                        "Edit posts",
+                        anyone,
+                        command,
+                        login_only,
+                    ));
+                }
             }
         }
         for anyone in [true, false] {

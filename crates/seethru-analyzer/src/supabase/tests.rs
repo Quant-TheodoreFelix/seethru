@@ -597,3 +597,40 @@ fn functions_owned_by_other_roles_or_in_private_schemas_are_not_reported() {
         Some(Severity::High)
     );
 }
+
+#[test]
+fn table_policy_that_only_checks_sign_in_is_open_to_any_signed_in_user() {
+    let report = run(&[(
+        "supabase/migrations/4_docs.sql",
+        "create table public.docs (id bigint, owner uuid);
+         alter table public.docs enable row level security;
+         create policy \"Signed in read\" on public.docs for select using (auth.uid() is not null);
+         create policy \"Role check\" on public.docs for delete
+           using ((select auth.role()) = 'authenticated');
+         create policy \"Anon only\" on public.docs for update to anon using (auth.uid() is not null);
+         create policy \"Owner\" on public.docs for update using (auth.uid() = owner);",
+    )]);
+    let rule = RuleId::SupabasePolicyUnrestricted;
+    let read = finding(&report, rule, "policy:public.docs/Signed in read");
+    assert_eq!(read.map(|f| f.severity), Some(Severity::Low));
+    assert!(
+        read.is_some_and(|f| f
+            .explanation
+            .en
+            .contains("only checks that the user is signed in")),
+        "{read:?}"
+    );
+    assert_eq!(
+        finding(&report, rule, "policy:public.docs/Role check").map(|f| f.severity),
+        Some(Severity::High)
+    );
+    assert!(finding(&report, rule, "policy:public.docs/Anon only").is_none());
+    assert!(finding(&report, rule, "policy:public.docs/Owner").is_none());
+    assert!(matches!(
+        node_kind(&report, "policy:public.docs/Signed in read"),
+        Some(NodeKind::AccessRule {
+            scope: RuleScope::Open,
+            ..
+        })
+    ));
+}
