@@ -307,6 +307,18 @@ fn write_next_sources(project: &TempProject) {
         "const key = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;\n\nexport async function purge() {\n  return fetch(\"/rest/v1/todos\", { headers: { apikey: key } });\n}\n",
     );
     project.write(
+        "src/app/(shop)/cart/page.jsx",
+        "export default function Cart() {\n  return <p>cart</p>;\n}\n",
+    );
+    project.write(
+        "src/app/api/todos/route.js",
+        "export async function DELETE() {\n  return Response.json({ ok: true });\n}\n",
+    );
+    project.write(
+        "src/pages/api/hello.js",
+        "export default function handler(req, res) {\n  res.status(200).json({ hello: true });\n}\n",
+    );
+    project.write(
         "src/lib/orphan.js",
         "const url = process.env.SUPABASE_SERVICE_ROLE_KEY;\nexport const value = url;\n",
     );
@@ -314,6 +326,14 @@ fn write_next_sources(project: &TempProject) {
 
 fn write_next_build(project: &TempProject) {
     project.write(".next/BUILD_ID", "S96k6rQ0hs5UqnNsfHyGn");
+    project.write(
+        ".next/server/app-paths-manifest.json",
+        r#"{"/(shop)/cart/page":"app/(shop)/cart/page.js","/_global-error/page":"app/_global-error/page.js","/_not-found/page":"app/_not-found/page.js","/api/todos/route":"app/api/todos/route.js","/page":"app/page.js"}"#,
+    );
+    project.write(
+        ".next/server/pages-manifest.json",
+        r#"{"/_app":"pages/_app.js","/_document":"pages/_document.js","/_error":"pages/_error.js","/api/hello":"pages/api/hello.js","/404":"pages/404.html"}"#,
+    );
     project.write(
         ".next/required-server-files.json",
         r#"{"version":1,"config":{"distDir":".next"},"appDir":"/ci/app","relativeAppDir":"","files":[],"ignore":[]}"#,
@@ -364,6 +384,42 @@ fn next_build_output_confirms_client_boundaries_and_server_files() {
     assert_eq!(
         service_role.map(|finding| finding.confidence),
         Some(Confidence::Likely)
+    );
+
+    let entries: Vec<(&str, &str)> = report
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Invokes)
+        .map(|edge| (edge.from.as_str(), edge.to.as_str()))
+        .collect();
+    assert_eq!(
+        entries,
+        vec![
+            ("entry:httpRoute:/", "file:src/app/page.jsx"),
+            ("entry:httpRoute:/api/hello", "file:src/pages/api/hello.js"),
+            (
+                "entry:httpRoute:/api/todos",
+                "file:src/app/api/todos/route.js"
+            ),
+            ("entry:httpRoute:/cart", "file:src/app/(shop)/cart/page.jsx"),
+        ]
+    );
+    assert!(
+        report
+            .nodes
+            .iter()
+            .any(|node| node.id.as_str() == "entry:httpRoute:/cart"
+                && matches!(
+                    node.kind,
+                    NodeKind::EntryPoint {
+                        channel: seethru_core::Channel::HttpRoute,
+                        exposure: seethru_core::Exposure::Unknown
+                    }
+                ))
+    );
+    assert_eq!(
+        component(&report, "src/app/api/todos/route.js"),
+        Some((Runtime::Server, Basis::BuildOutput))
     );
 
     project.write(

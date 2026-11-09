@@ -18,8 +18,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use seethru_core::{
-    Basis, Confidence, CredentialDetail, Ecosystem, EdgeKind, EvidenceStep, Input, LimitationCode,
-    Location, Node, NodeId, NodeKind, RuleId, ScanReport, Severity, TargetInfo, Zone,
+    Basis, Channel, Confidence, CredentialDetail, Ecosystem, EdgeKind, EvidenceStep, Exposure,
+    Input, LimitationCode, Location, Node, NodeId, NodeKind, RuleId, ScanReport, Severity,
+    TargetInfo, Zone,
 };
 
 use build_output::BuildOutput;
@@ -194,6 +195,23 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     for record in scripts {
         let assigned = assigned_of(&record.rel_path, FileRole::UnknownCode);
         record.emit(&mut graph, &assigned);
+    }
+    if let Some(build) = &build {
+        for route in &build.routes {
+            let assigned = assigned_of(&route.source, FileRole::ServerCode);
+            let file_id = graph.add_file(&route.source, assigned.role, assigned.basis);
+            let entry_id = graph.add_node(Node {
+                id: NodeId::new(format!("entry:httpRoute:{}", route.url)),
+                label: route.url.clone(),
+                kind: NodeKind::EntryPoint {
+                    channel: Channel::HttpRoute,
+                    exposure: Exposure::Unknown,
+                },
+                zone: Zone::Server,
+                location: Some(file_location(&route.source)),
+            });
+            graph.add_edge(entry_id, file_id, EdgeKind::Invokes);
+        }
     }
     for (table, location) in first_use {
         let table_id = NodeId::new(format!("table:public.{table}"));

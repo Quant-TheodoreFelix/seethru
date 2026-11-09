@@ -27,6 +27,15 @@ const VITE_ASSETS_DIR: &str = "assets/";
 const SCRIPT_SUFFIXES: &[&str] = &[".js", ".mjs", ".cjs"];
 const CLIENT_REFERENCE_SUFFIX: &str = "_client-reference-manifest.js";
 const RSC_MANIFEST_MARKER: &str = "__RSC_MANIFEST[";
+const APP_PATHS_MANIFEST: &str = "server/app-paths-manifest.json";
+const PAGES_MANIFEST: &str = "server/pages-manifest.json";
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Route {
+    pub url: String,
+    pub source: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuildDir {
@@ -43,6 +52,7 @@ pub(crate) struct BuildOutput {
     pub complete: bool,
     pub browser: BTreeMap<String, String>,
     pub server: BTreeMap<String, String>,
+    pub routes: BTreeSet<Route>,
     dir: BuildDir,
     sources: Sources,
 }
@@ -157,6 +167,7 @@ pub(crate) fn read(
         complete: false,
         browser: BTreeMap::new(),
         server: BTreeMap::new(),
+        routes: BTreeSet::new(),
         dir,
         sources: Sources {
             root: project_root,
@@ -179,6 +190,7 @@ pub(crate) fn read(
         output.complete = false;
         output.browser.clear();
         output.server.clear();
+        output.routes.clear();
     }
     Ok(output)
 }
@@ -261,6 +273,7 @@ impl BuildOutput {
                 .relative_app_dir
                 .filter(|dir| !dir.is_empty() && !dir.contains("..") && !dir.starts_with('/'));
         }
+        self.read_routes(budget);
         let mut client_maps = 0usize;
         for file in files {
             if file.starts_with("server/app/") && file.ends_with(CLIENT_REFERENCE_SUFFIX) {
@@ -299,6 +312,38 @@ impl BuildOutput {
         }
         self.partial |= client_maps == 0;
         self.complete = false;
+    }
+
+    fn read_routes(&mut self, budget: &mut Budget) {
+        for (manifest, app) in [(APP_PATHS_MANIFEST, true), (PAGES_MANIFEST, false)] {
+            let Some(bytes) = budget.read(&self.dir.abs.join(manifest), MAX_MANIFEST_BYTES) else {
+                continue;
+            };
+            let Ok(entries) = serde_json::from_slice::<BTreeMap<String, String>>(&bytes) else {
+                continue;
+            };
+            let evidence = self.scan_rel(manifest);
+            for (key, file) in entries {
+                if key.starts_with("/_") || file.ends_with(".html") {
+                    continue;
+                }
+                let source = if app {
+                    self.sources.app_route_source(&key)
+                } else {
+                    self.sources.pages_route_source(&key)
+                };
+                let Some(source) = source else {
+                    continue;
+                };
+                self.server
+                    .entry(source.clone())
+                    .or_insert_with(|| evidence.clone());
+                self.routes.insert(Route {
+                    url: if app { app_route_url(&key) } else { key },
+                    source,
+                });
+            }
+        }
     }
 
     fn chunk_sources(&self, chunk: &str, budget: &mut Budget) -> Option<BTreeSet<String>> {
@@ -442,6 +487,31 @@ impl Sources {
         })
     }
 
+    fn with_extension(&self, stem: &str) -> Option<String> {
+        SOURCE_EXTENSIONS
+            .iter()
+            .find_map(|extension| self.known(format!("{stem}.{extension}")))
+    }
+
+    fn app_route_source(&self, key: &str) -> Option<String> {
+        ["app", "src/app"].into_iter().find_map(|dir| {
+            let stem = join(&self.root, &format!("{dir}{key}"))?;
+            self.with_extension(&stem)
+        })
+    }
+
+    fn pages_route_source(&self, key: &str) -> Option<String> {
+        ["pages", "src/pages"].into_iter().find_map(|dir| {
+            let base = join(&self.root, &format!("{dir}{key}"))?;
+            let index = join(&base, "index")?;
+            if key == "/" {
+                return self.with_extension(&index);
+            }
+            self.with_extension(&base)
+                .or_else(|| self.with_extension(&index))
+        })
+    }
+
     fn suffix(&self, absolute: &str) -> Option<String> {
         let normalized = absolute.replace('\\', "/");
         normalized
@@ -450,6 +520,19 @@ impl Sources {
             .filter(|tail| !tail.is_empty())
             .find_map(|tail| self.known(tail.to_owned()))
     }
+}
+
+fn app_route_url(key: &str) -> String {
+    let mut segments: Vec<&str> = key
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .filter(|segment| !(segment.starts_with('(') && segment.ends_with(')')))
+        .filter(|segment| !segment.starts_with('@'))
+        .collect();
+    if matches!(segments.last(), Some(&"page") | Some(&"route")) {
+        segments.pop();
+    }
+    format!("/{}", segments.join("/"))
 }
 
 fn newest_script(root: &Path, sources: &Sources) -> Option<SystemTime> {
@@ -561,7 +644,7 @@ pub(crate) fn join(base: &str, path: &str) -> Option<String> {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{Sources, client_reference_keys, join, percent_decode};
+    use super::{Sources, app_route_url, client_reference_keys, join, percent_decode};
 
     fn sources(root: &str, app_dir: Option<&str>, scripts: &[&str]) -> Sources {
         Sources {
@@ -583,6 +666,52 @@ mod tests {
         assert_eq!(join("dist", "../../etc/passwd"), None);
         assert_eq!(join("", "./src/./a.ts"), Some("src/a.ts".to_owned()));
         assert_eq!(join("", ""), None);
+    }
+
+    #[test]
+    fn turns_app_router_entries_into_urls() {
+        assert_eq!(app_route_url("/page"), "/");
+        assert_eq!(app_route_url("/api/todos/route"), "/api/todos");
+        assert_eq!(app_route_url("/(shop)/cart/page"), "/cart");
+        assert_eq!(app_route_url("/dashboard/@stats/page"), "/dashboard");
+        assert_eq!(app_route_url("/blog/[slug]/page"), "/blog/[slug]");
+    }
+
+    #[test]
+    fn finds_route_sources_with_any_script_extension() {
+        let s = sources(
+            "",
+            None,
+            &[
+                "src/app/page.tsx",
+                "app/api/todos/route.ts",
+                "src/pages/api/hello.js",
+                "pages/index.tsx",
+                "pages/blog/index.jsx",
+            ],
+        );
+        assert_eq!(
+            s.app_route_source("/page").as_deref(),
+            Some("src/app/page.tsx")
+        );
+        assert_eq!(
+            s.app_route_source("/api/todos/route").as_deref(),
+            Some("app/api/todos/route.ts")
+        );
+        assert_eq!(s.app_route_source("/missing/page"), None);
+        assert_eq!(
+            s.pages_route_source("/api/hello").as_deref(),
+            Some("src/pages/api/hello.js")
+        );
+        assert_eq!(
+            s.pages_route_source("/").as_deref(),
+            Some("pages/index.tsx")
+        );
+        assert_eq!(
+            s.pages_route_source("/blog").as_deref(),
+            Some("pages/blog/index.jsx")
+        );
+        assert_eq!(s.app_route_source("/../../etc/page"), None);
     }
 
     #[test]
