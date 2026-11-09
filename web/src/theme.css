@@ -151,6 +151,7 @@ code {
   letter-spacing: 0.14em;
   line-height: 1.2;
   text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
   transition: opacity 120ms ease-out;
 }
@@ -200,6 +201,16 @@ code {
 .switch button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+:lang(ko) {
+  word-break: keep-all;
+}
+
+.tag:lang(ko),
+.button:lang(ko),
+.switch button:lang(ko) {
+  letter-spacing: 0.04em;
 }
 
 .error {

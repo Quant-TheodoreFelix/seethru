@@ -265,9 +265,10 @@
 
 .fix-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 8px 12px;
 }
 
 .fix-head h4 {
@@ -428,6 +429,18 @@
     width: auto;
     max-height: none;
     margin: 0 12px 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .navbar-start {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .navbar-start > span {
+    max-width: 100%;
   }
 }
 

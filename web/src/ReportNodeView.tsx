@@ -1,9 +1,11 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { SEVERITY_LABEL, kindLabel } from "./labels";
+import { kindLabel } from "./messages";
 import type { GraphNode } from "./layout";
+import { useMessages } from "./useLang";
 
 export function ReportNodeView({ data, selected }: NodeProps<GraphNode>) {
   const { node, severity, findingCount } = data;
+  const m = useMessages();
   const classes = ["node", `node-${node.kind.type}`];
   if (severity) classes.push("has-finding", `sev-${severity}`);
   if (selected) classes.push("is-selected");
@@ -12,10 +14,10 @@ export function ReportNodeView({ data, selected }: NodeProps<GraphNode>) {
     <div className={classes.join(" ")}>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <div className="node-head">
-        <span className="node-kind">{kindLabel(node.kind)}</span>
+        <span className="node-kind">{kindLabel(node.kind, m)}</span>
         {severity ? (
           <span className={`node-badge tag sev-${severity}`}>
-            {SEVERITY_LABEL[severity]}
+            {m.severity[severity]}
             {findingCount > 1 ? ` ${findingCount}` : ""}
           </span>
         ) : null}

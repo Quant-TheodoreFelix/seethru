@@ -14,12 +14,14 @@ import "@xyflow/react/dist/style.css";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { InlineText } from "./InlineText";
-import { EDGE_LABEL, SEVERITY_LABEL } from "./labels";
 import { layoutReport, type GraphNode } from "./layout";
 import { readEmbeddedReport, readReportFile } from "./loadReport";
 import { SEVERITIES, edgeKindsIn, type EdgeKind, type Finding, type ScanReport, type Severity } from "./model";
 import { ReportNodeView } from "./ReportNodeView";
+import { LANGS, type Lang } from "./lang";
+import { MESSAGES } from "./messages";
 import { THEMES, type Theme } from "./theme";
+import { LangContext, useCurrentLang, useLang, useMessages } from "./useLang";
 import { useTheme } from "./useTheme";
 
 const nodeTypes: NodeTypes = { report: ReportNodeView };
@@ -42,6 +44,8 @@ function initialState(): Loaded {
 export function App() {
   const [loaded, setLoaded] = useState<Loaded>(initialState);
   const [theme, setTheme] = useTheme();
+  const [lang, setLang] = useLang();
+  const m = MESSAGES[lang];
 
   const onFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -55,56 +59,80 @@ export function App() {
   const report = loaded.state === "ready" ? loaded.report : undefined;
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div className="shell">
-        <header className="navbar">
-          <div className="navbar-start">
-            {report ? (
-              <>
-                <span className="target-name" title={report.target.name}>
-                  {report.target.name}
-                </span>
-                <span className="target-meta">
-                  {report.target.filesScanned} {report.target.filesScanned === 1 ? "file" : "files"} scanned
-                  {report.target.truncated ? ", stopped early" : ""}
-                </span>
-              </>
-            ) : null}
-          </div>
-          <p className="logo">Seethru</p>
-          <div className="navbar-end">
-            <ThemeSwitch theme={theme} onChange={setTheme} />
-          </div>
-        </header>
-        {report ? (
-          <ReactFlowProvider>
-            <ReportView report={report} theme={theme} />
-          </ReactFlowProvider>
-        ) : (
-          <main className="landing">
-            <h1>Open a scan report</h1>
-            <p>
-              Choose a file made with <code>seethru scan --json</code>. It stays on this computer.
-            </p>
-            <label className="file-button button">
-              Open report file
-              <input type="file" accept="application/json,.json" onChange={onFile} />
-            </label>
-            {loaded.state === "error" ? <p className="error">Could not read the report file ({loaded.message})</p> : null}
-          </main>
-        )}
-      </div>
-    </MotionConfig>
+    <LangContext value={lang}>
+      <MotionConfig reducedMotion="user">
+        <div className="shell">
+          <header className="navbar">
+            <div className="navbar-start">
+              {report ? (
+                <>
+                  <span className="target-name" title={report.target.name}>
+                    {report.target.name}
+                  </span>
+                  <span className="target-meta">{m.scanned(report.target.filesScanned, report.target.truncated)}</span>
+                </>
+              ) : null}
+            </div>
+            <p className="logo">Seethru</p>
+            <div className="navbar-end">
+              <ThemeSwitch theme={theme} onChange={setTheme} />
+              <LangSwitch lang={lang} onChange={setLang} />
+            </div>
+          </header>
+          {report ? (
+            <ReactFlowProvider>
+              <ReportView report={report} theme={theme} />
+            </ReactFlowProvider>
+          ) : (
+            <main className="landing">
+              <h1>{m.openTitle}</h1>
+              <p>
+                <InlineText text={m.openBody} />
+              </p>
+              <label className="file-button button">
+                {m.openButton}
+                <input type="file" accept="application/json,.json" onChange={onFile} />
+              </label>
+              {loaded.state === "error" ? <p className="error">{m.readError(loaded.message)}</p> : null}
+            </main>
+          )}
+        </div>
+      </MotionConfig>
+    </LangContext>
   );
 }
 
 function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+  const m = useMessages();
   return (
-    <ul className="switch" aria-label="Color theme">
+    <ul className="switch" aria-label={m.colorTheme}>
       {THEMES.map((option) => (
         <li key={option}>
           <button type="button" aria-pressed={theme === option} onClick={() => onChange(option)}>
-            {option === "light" ? "Light" : "Dark"}
+            {m.theme[option]}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const LANG_NAME: Record<Lang, string> = { en: "English", ko: "한국어" };
+
+function LangSwitch({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
+  const m = useMessages();
+  return (
+    <ul className="switch" aria-label={m.languageSwitch}>
+      {LANGS.map((option) => (
+        <li key={option}>
+          <button
+            type="button"
+            lang={option}
+            title={LANG_NAME[option]}
+            aria-pressed={lang === option}
+            onClick={() => onChange(option)}
+          >
+            {m.language[option]}
           </button>
         </li>
       ))}
@@ -113,7 +141,8 @@ function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (theme: Them
 }
 
 function SeverityTag({ severity }: { severity: Severity }) {
-  return <span className={`tag sev-${severity}`}>{SEVERITY_LABEL[severity]}</span>;
+  const m = useMessages();
+  return <span className={`tag sev-${severity}`}>{m.severity[severity]}</span>;
 }
 
 function minimapClass(node: GraphNode) {
@@ -121,16 +150,17 @@ function minimapClass(node: GraphNode) {
 }
 
 function Legend({ kinds }: { kinds: EdgeKind[] }) {
+  const m = useMessages();
   if (kinds.length === 0) return null;
   return (
-    <Panel position="top-left" className="legend" aria-label="Line styles">
+    <Panel position="top-left" className="legend" aria-label={m.lineStyles}>
       <ul>
         {kinds.map((kind) => (
           <li key={kind}>
             <svg width="28" height="8" aria-hidden="true">
               <line className={`legend-line edge-${kind}`} x1="0" y1="4" x2="28" y2="4" />
             </svg>
-            {EDGE_LABEL[kind]}
+            {m.edge[kind]}
           </li>
         ))}
       </ul>
@@ -158,6 +188,8 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   const [selectedId, setSelectedId] = useState<string>();
   const list = useRef<HTMLOListElement>(null);
   const flow = useReactFlow<GraphNode>();
+  const lang = useCurrentLang();
+  const m = useMessages();
 
   useEffect(() => {
     let active = true;
@@ -203,12 +235,12 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
 
   return (
     <div className="workspace">
-      <aside className="sidebar" aria-label="Findings">
+      <aside className="sidebar" aria-label={m.findings}>
         <div className="sidebar-head">
-          <h2>Findings</h2>
+          <h2>{m.findings}</h2>
           <span className="sidebar-count">{report.findings.length}</span>
         </div>
-        {report.findings.length === 0 ? <p className="empty">No problems found.</p> : null}
+        {report.findings.length === 0 ? <p className="empty">{m.noProblems}</p> : null}
         <ol className="findings" ref={list}>
           {report.findings.map((finding, index) => (
             <li key={finding.id} data-finding={finding.id}>
@@ -223,10 +255,10 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                   <SeverityTag severity={finding.severity} />
                 </span>
                 <span className="finding-title">
-                  <InlineText text={finding.title.en} />
+                  <InlineText text={finding.title[lang]} />
                 </span>
                 <span className="finding-text">
-                  <InlineText text={finding.explanation.en} />
+                  <InlineText text={finding.explanation[lang]} />
                 </span>
                 {finding.location ? (
                   <span className="finding-where">
@@ -244,14 +276,14 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
             const count = report.summary[severity];
             return (
               <div key={severity} className={`summary-cell sev-${severity} ${count > 0 ? "has-findings" : "is-zero"}`}>
-                <dt className="tag">{SEVERITY_LABEL[severity]}</dt>
+                <dt className="tag">{m.severity[severity]}</dt>
                 <dd>{count}</dd>
               </div>
             );
           })}
         </dl>
         <div className="canvas">
-          {layoutError ? <p className="error">Could not draw the graph ({layoutError})</p> : null}
+          {layoutError ? <p className="error">{m.layoutError(layoutError)}</p> : null}
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -277,7 +309,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
               <motion.section
                 key={selected.id}
                 className="fix-panel"
-                aria-label="Selected finding"
+                aria-label={m.selectedFinding}
                 initial={{ opacity: 0, x: 16 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 16 }}
@@ -286,18 +318,18 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                 <div className="fix-panel-head">
                   <SeverityTag severity={selected.severity} />
                   <button type="button" className="button quiet" onClick={clear}>
-                    Close
+                    {m.close}
                   </button>
                 </div>
                 <h3>
-                  <InlineText text={selected.title.en} />
+                  <InlineText text={selected.title[lang]} />
                 </h3>
                 {selected.location ? (
                   <p className="where">
                     {selected.location.path}:{selected.location.line}
                   </p>
                 ) : null}
-                {selected.fixPrompt ? <FixPrompt key={selected.id} prompt={selected.fixPrompt.en} /> : null}
+                {selected.fixPrompt ? <FixPrompt key={`${selected.id}:${lang}`} prompt={selected.fixPrompt[lang]} /> : null}
               </motion.section>
             ) : null}
           </AnimatePresence>
@@ -312,6 +344,7 @@ type CopyState = "idle" | "copied" | "manual";
 function FixPrompt({ prompt }: { prompt: string }) {
   const area = useRef<HTMLTextAreaElement>(null);
   const [state, setState] = useState<CopyState>("idle");
+  const m = useMessages();
 
   const copy = useCallback(() => {
     const selectForManualCopy = () => {
@@ -329,22 +362,22 @@ function FixPrompt({ prompt }: { prompt: string }) {
   return (
     <div className="fix">
       <div className="fix-head">
-        <h4>Ask your AI to fix it</h4>
+        <h4>{m.fixTitle}</h4>
         <button type="button" className={`button copy ${state === "copied" ? "is-done" : ""}`} onClick={copy}>
-          {state === "copied" ? "Copied" : "Copy prompt"}
+          {state === "copied" ? m.copied : m.copy}
         </button>
       </div>
-      <p>Paste it as is into an AI coding tool such as Cursor, Claude or Lovable.</p>
+      <p>{m.fixHint}</p>
       <textarea
         ref={area}
         className="fix-prompt"
-        aria-label="Fix prompt"
+        aria-label={m.fixPrompt}
         readOnly
         value={prompt}
         rows={10}
         spellCheck={false}
       />
-      {state === "manual" ? <p>The browser blocked copying. The prompt is selected, so copy it yourself.</p> : null}
+      {state === "manual" ? <p>{m.copyBlocked}</p> : null}
     </div>
   );
 }
