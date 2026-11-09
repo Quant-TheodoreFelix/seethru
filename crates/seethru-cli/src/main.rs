@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use seethru_core::{Lang, ScanReport, Severity};
+use seethru_core::{Confidence, Lang, ScanReport, Severity};
 
 const USAGE: &str = "\
 seethru - see through your app before attackers do
@@ -232,6 +232,16 @@ fn severity_label(severity: Severity, lang: Lang) -> &'static str {
     }
 }
 
+fn confidence_note(confidence: Confidence, lang: Lang) -> &'static str {
+    match (lang, confidence) {
+        (_, Confidence::Certain) => "",
+        (Lang::En, Confidence::Likely) => " (likely)",
+        (Lang::En, Confidence::Review) => " (needs review)",
+        (Lang::Ko, Confidence::Likely) => " (추정)",
+        (Lang::Ko, Confidence::Review) => " (확인 필요)",
+    }
+}
+
 fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::Result<()> {
     let target = &report.target;
     let excluded = target.files_excluded;
@@ -315,7 +325,8 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
             Lang::En => label.to_uppercase(),
             Lang::Ko => label.to_owned(),
         };
-        writeln!(out, "[{label}] {}", finding.title.get(lang))?;
+        let note = confidence_note(finding.confidence, lang);
+        writeln!(out, "[{label}] {}{note}", finding.title.get(lang))?;
         writeln!(out, "  {}", place(finding))?;
     }
     if !accepted.is_empty() {
@@ -330,6 +341,16 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
             if let Some(acceptance) = &finding.accepted {
                 writeln!(out, "  {reason}: {}", acceptance.reason)?;
             }
+        }
+    }
+    if !target.limitations.is_empty() {
+        let heading = match lang {
+            Lang::En => "Not checked",
+            Lang::Ko => "확인하지 못한 것",
+        };
+        writeln!(out, "\n{heading}")?;
+        for limitation in &target.limitations {
+            writeln!(out, "- {}", limitation.text.get(lang))?;
         }
     }
     Ok(())
@@ -347,8 +368,8 @@ fn place(finding: &seethru_core::Finding) -> String {
 mod tests {
     use super::{Command, parse, print_summary};
     use seethru_core::{
-        Acceptance, Confidence, Finding, Lang, LocalizedText, NodeId, Origin, RuleId,
-        SCHEMA_VERSION, ScanReport, Severity, Summary, TargetInfo, ToolInfo,
+        Acceptance, Confidence, Finding, Lang, Limitation, LimitationCode, LocalizedText, NodeId,
+        Origin, RuleId, SCHEMA_VERSION, ScanReport, Severity, Summary, TargetInfo, ToolInfo,
     };
     use std::ffi::OsString;
 
@@ -476,6 +497,37 @@ mod tests {
         assert!(ko.contains("(파일 1개, 건너뜀 0개)"), "{ko}");
         assert!(ko.contains("치명적 1  높음 0"), "{ko}");
         assert!(ko.contains("[치명적] RLS가 꺼져 있어요"), "{ko}");
+    }
+
+    #[test]
+    fn summary_notes_uncertain_findings_and_what_was_not_checked() {
+        let mut report = one_finding_report();
+        if let Some(finding) = report.findings.first_mut() {
+            finding.confidence = Confidence::Likely;
+        }
+        report.target.limitations.push(Limitation {
+            code: LimitationCode::BuildOutputNotRead,
+            text: LocalizedText {
+                en: "No build output was read.".to_owned(),
+                ko: "빌드 결과물을 읽지 않았어요.".to_owned(),
+            },
+        });
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::En).is_ok());
+        let en = String::from_utf8(out).unwrap_or_default();
+        assert!(en.contains("[CRITICAL] RLS is off (likely)"), "{en}");
+        assert!(
+            en.contains("\nNot checked\n- No build output was read.\n"),
+            "{en}"
+        );
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::Ko).is_ok());
+        let ko = String::from_utf8(out).unwrap_or_default();
+        assert!(ko.contains("[치명적] RLS가 꺼져 있어요 (추정)"), "{ko}");
+        assert!(
+            ko.contains("\n확인하지 못한 것\n- 빌드 결과물을 읽지 않았어요.\n"),
+            "{ko}"
+        );
     }
 
     #[test]
