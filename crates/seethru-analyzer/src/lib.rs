@@ -1,3 +1,4 @@
+mod build_output;
 mod classify;
 mod config;
 mod env;
@@ -8,17 +9,20 @@ mod roles;
 mod rules;
 mod script;
 mod secrets;
+mod sourcemap;
 mod supabase;
 mod walk;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use seethru_core::{
-    Confidence, CredentialDetail, Ecosystem, EdgeKind, EvidenceStep, Input, LimitationCode,
+    Basis, Confidence, CredentialDetail, Ecosystem, EdgeKind, EvidenceStep, Input, LimitationCode,
     Location, Node, NodeId, NodeKind, RuleId, ScanReport, Severity, TargetInfo, Zone,
 };
+
+use build_output::BuildOutput;
 
 use classify::{Class, Content, FileRole, ProjectHints};
 use config::Config;
@@ -36,6 +40,7 @@ pub enum ScanError {
     NotADirectory,
     Io(std::io::Error),
     Config(String),
+    BuildOutput(String),
 }
 
 impl fmt::Display for ScanError {
@@ -44,20 +49,25 @@ impl fmt::Display for ScanError {
             Self::NotADirectory => f.write_str("scan target is not a directory"),
             Self::Io(error) => write!(f, "cannot read scan target: {error}"),
             Self::Config(message) => write!(f, "cannot use {CONFIG_FILE}: {message}"),
+            Self::BuildOutput(message) => write!(f, "cannot use the build output: {message}"),
         }
     }
 }
 
 impl std::error::Error for ScanError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanOptions {
     pub read_config: bool,
+    pub build_output: Option<PathBuf>,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
-        Self { read_config: true }
+        Self {
+            read_config: true,
+            build_output: None,
+        }
     }
 }
 
@@ -75,6 +85,11 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     } else {
         None
     };
+    let build_dir = options
+        .build_output
+        .as_deref()
+        .map(|given| build_output::locate(&root, given))
+        .transpose()?;
     let walked = walk::walk(&root, classify::is_wanted, |rel_path| {
         config
             .as_ref()
@@ -88,6 +103,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut modules = Vec::new();
     let mut secret_records = Vec::new();
     let mut configs = Vec::new();
+    let mut script_paths = BTreeMap::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
     let mut uses_supabase = false;
@@ -101,6 +117,9 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             continue;
         };
         scanned = scanned.saturating_add(1);
+        if class.content == Content::Script && !class.role.is_build_output() {
+            script_paths.insert(entry.rel_path.clone(), class);
+        }
         if class.content == Content::Sql {
             migrations.apply_file(&entry.rel_path, &text);
             uses_supabase |=
@@ -140,7 +159,16 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
 
     let module_paths: BTreeSet<String> = modules.iter().map(|m| m.rel_path.clone()).collect();
     let resolver = Resolver::new(&module_paths, hints.roots(), &configs);
-    let roles = roles::assign(&modules, &resolver);
+    let mut roles = roles::assign(&modules, &resolver);
+    let build = match build_dir {
+        Some(dir) => {
+            let scripts: BTreeSet<String> = script_paths.keys().cloned().collect();
+            let build = build_output::read(&root, dir, &hints, &scripts)?;
+            overlay(&build, &script_paths, &mut roles);
+            Some(build)
+        }
+        None => None,
+    };
     let assigned_of = |rel_path: &str, fallback: FileRole| {
         roles
             .get(rel_path)
@@ -184,6 +212,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
                     rule: RuleId::SupabaseTableSchemaMissing,
                     severity: Severity::Info,
                     confidence: Confidence::Review,
+                    from_build: false,
                 },
                 rules::table_schema_missing(&table),
                 table_id,
@@ -194,7 +223,23 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     }
     for record in secret_records {
         let assigned = assigned_of(&record.rel_path, record.class.role);
-        record.emit(&mut graph, &assigned);
+        let origins: Vec<Option<Built>> = record
+            .hits
+            .iter()
+            .map(|hit| {
+                let (path, line, column) = build.as_ref()?.locate(
+                    &record.rel_path,
+                    hit.location.line,
+                    hit.utf16_column,
+                )?;
+                let assigned = assigned_of(&path, FileRole::UnknownCode);
+                Some(Built {
+                    location: Location { path, line, column },
+                    assigned,
+                })
+            })
+            .collect();
+        record.emit(&mut graph, &assigned, origins);
     }
 
     let mut ecosystems = hints.ecosystems();
@@ -203,8 +248,25 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     }
     ecosystems.sort();
     let mut limitations = Vec::new();
-    if !modules.is_empty() {
-        limitations.push(rules::limitation(LimitationCode::BuildOutputNotRead));
+    let mut inputs = vec![Input::Source {}];
+    match &build {
+        None if !modules.is_empty() => {
+            limitations.push(rules::limitation(LimitationCode::BuildOutputNotRead));
+        }
+        None => {}
+        Some(build) => {
+            inputs.push(Input::BuildOutput {
+                path: build.rel.clone(),
+                tool: build.tool,
+            });
+            if build.stale {
+                limitations.push(rules::limitation(LimitationCode::BuildOutputStale));
+            } else if build.partial {
+                limitations.push(rules::limitation(
+                    LimitationCode::BuildOutputWithoutSourceMaps,
+                ));
+            }
+        }
     }
     if uses_supabase {
         limitations.push(rules::limitation(LimitationCode::DashboardPoliciesUnseen));
@@ -223,7 +285,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         truncated: walked.truncated,
         config_file: config.as_ref().map(|_| CONFIG_FILE.to_owned()),
         ecosystems,
-        inputs: vec![Input::Source {}],
+        inputs,
         limitations,
     });
     if let Some(config) = &config {
@@ -267,6 +329,21 @@ impl<'a> Lines<'a> {
         )
     }
 
+    pub(crate) fn utf16_column(&self, offset: usize) -> u32 {
+        let offset = offset.min(self.text.len());
+        let line = self.starts.partition_point(|start| *start <= offset);
+        let line_start = line
+            .checked_sub(1)
+            .and_then(|index| self.starts.get(index))
+            .copied()
+            .unwrap_or(0);
+        let units = self
+            .text
+            .get(line_start..offset)
+            .map_or(0, |span| span.encode_utf16().count());
+        u32::try_from(units).unwrap_or(u32::MAX)
+    }
+
     pub(crate) fn location(&self, rel_path: &str, offset: usize) -> Location {
         let (line, column) = self.position(offset);
         Location {
@@ -277,7 +354,53 @@ impl<'a> Lines<'a> {
     }
 }
 
+fn overlay(
+    build: &BuildOutput,
+    scripts: &BTreeMap<String, Class>,
+    roles: &mut BTreeMap<String, Assigned>,
+) {
+    if build.stale {
+        return;
+    }
+    let prefix = format!("{}/", build.root);
+    for (rel_path, class) in scripts {
+        if !build.root.is_empty() && !rel_path.starts_with(&prefix) {
+            continue;
+        }
+        let current = roles
+            .get(rel_path)
+            .cloned()
+            .unwrap_or_else(|| Assigned::by_path(class.role));
+        if roles::is_fixed(current.role) {
+            continue;
+        }
+        let confirmed = if let Some(chunk) = build.browser.get(rel_path) {
+            Assigned::by_build(FileRole::BrowserCode, Some(chunk.clone()))
+        } else if let Some(chunk) = build.server.get(rel_path)
+            && current.role != FileRole::BrowserCode
+        {
+            Assigned::by_build(FileRole::ServerCode, Some(chunk.clone()))
+        } else if build.complete && current.role == FileRole::BrowserCode && !class.served_as_is {
+            Assigned::by_build(FileRole::UnknownCode, None)
+        } else {
+            continue;
+        };
+        roles.insert(rel_path.clone(), confirmed);
+    }
+}
+
+struct Built {
+    location: Location,
+    assigned: Assigned,
+}
+
 fn file_steps(rel_path: &str, assigned: &Assigned) -> Vec<EvidenceStep> {
+    if let Some(chunk) = &assigned.built_into {
+        return vec![
+            file_step(chunk, None, file_location(chunk)),
+            file_step(rel_path, Some(EdgeKind::BuiltFrom), file_location(rel_path)),
+        ];
+    }
     let mut steps = Vec::with_capacity(assigned.via.len() + 1);
     let mut via = None;
     let mut from: Option<&Location> = None;
@@ -305,6 +428,7 @@ struct SecretHit {
     kind: seethru_core::SecretKind,
     masked: seethru_core::MaskedSecret,
     location: Location,
+    utf16_column: u32,
     public_var: Option<String>,
 }
 
@@ -338,6 +462,7 @@ impl SecretRecord {
                 kind: hit.kind,
                 masked: hit.masked,
                 location: lines.location(rel_path, hit.offset),
+                utf16_column: lines.utf16_column(hit.offset),
                 public_var,
             });
         }
@@ -349,12 +474,17 @@ impl SecretRecord {
         })
     }
 
-    fn emit(self, graph: &mut Graph, assigned: &Assigned) {
+    fn emit(self, graph: &mut Graph, assigned: &Assigned, origins: Vec<Option<Built>>) {
         let rel_path = self.rel_path.as_str();
         let role = assigned.role;
-        let delivered_as_is = role == FileRole::BuildOutput || self.class.served_as_is;
+        let build_confirmed = assigned.basis == Basis::BuildOutput;
+        let delivered_as_is =
+            role == FileRole::BuildOutput || self.class.served_as_is || build_confirmed;
         let mut ordinals: BTreeMap<seethru_core::SecretKind, u32> = BTreeMap::new();
+        let mut origins = origins.into_iter();
         for hit in self.hits {
+            let origin = origins.next().flatten();
+            let from_build = build_confirmed || origin.is_some();
             let ordinal = ordinals.entry(hit.kind).or_insert(0);
             *ordinal = ordinal.saturating_add(1);
             let secret_id = format!("secret:{rel_path}:{}:{ordinal}", hit.kind.as_str());
@@ -364,6 +494,7 @@ impl SecretRecord {
                         rule: RuleId::SecretInPublicEnvVar,
                         severity: Severity::Critical,
                         confidence: Confidence::Certain,
+                        from_build: false,
                     },
                     rules::secret_in_public_env(hit.kind, var),
                 ),
@@ -376,6 +507,7 @@ impl SecretRecord {
                         } else {
                             Confidence::Likely
                         },
+                        from_build,
                     },
                     rules::secret_in_browser(hit.kind, rel_path),
                 ),
@@ -384,12 +516,25 @@ impl SecretRecord {
                         rule: RuleId::SecretInSourceCode,
                         severity: Severity::High,
                         confidence: Confidence::Certain,
+                        from_build,
                     },
                     rules::secret_in_source(hit.kind, rel_path),
                 ),
             };
             let file_id = graph.add_file(rel_path, role, assigned.basis);
-            let mut evidence = file_steps(rel_path, assigned);
+            let mut evidence = match &origin {
+                Some(built) => {
+                    let source = &built.location.path;
+                    let source_id =
+                        graph.add_file(source, built.assigned.role, built.assigned.basis);
+                    graph.add_edge(file_id.clone(), source_id, EdgeKind::BuiltFrom);
+                    vec![
+                        file_step(rel_path, None, hit.location.clone()),
+                        file_step(source, Some(EdgeKind::BuiltFrom), built.location.clone()),
+                    ]
+                }
+                None => file_steps(rel_path, assigned),
+            };
             let zone = match &hit.public_var {
                 Some(var) if env::is_public(var) => Zone::Client,
                 Some(_) => Zone::Server,
@@ -502,7 +647,12 @@ impl ScriptRecord {
                     Verdict {
                         rule: RuleId::SupabaseServiceRoleInBrowser,
                         severity: Severity::Critical,
-                        confidence: Confidence::Likely,
+                        confidence: if assigned.basis == Basis::BuildOutput {
+                            Confidence::Certain
+                        } else {
+                            Confidence::Likely
+                        },
+                        from_build: assigned.basis == Basis::BuildOutput,
                     },
                     rules::service_role_in_browser(&name, prefix),
                     env_id,

@@ -23,7 +23,7 @@ test("starts in the language the page was written in", () => {
 function strings(value: unknown, path: string): [string, string][] {
   if (typeof value === "string") return [[path, value]];
   if (typeof value === "function") {
-    const target = { name: "app", filesScanned: 2, filesSkipped: 0, filesExcluded: 1, truncated: true };
+    const target = { name: "app", filesScanned: 2, filesSkipped: 0, filesExcluded: 1, truncated: true, inputs: [] };
     return [[path, String(value.length === 1 && path.endsWith("scanned") ? value(target) : value("x"))]];
   }
   return Object.entries(value as Record<string, unknown>).flatMap(([key, inner]) => strings(inner, `${path}.${key}`));
@@ -40,13 +40,16 @@ test("both languages fill every message", () => {
     assert.ok(text.trim().length > 0, path);
     assert.ok(!text.includes("—"), path);
   }
-  const target = { name: "app", filesScanned: 1, filesSkipped: 0, filesExcluded: 0, truncated: false };
+  const target = { name: "app", filesScanned: 1, filesSkipped: 0, filesExcluded: 0, truncated: false, inputs: [] };
+  const withBuild = { ...target, inputs: [{ type: "source" as const }, { type: "buildOutput" as const, path: "dist", tool: "vite" as const }] };
   assert.equal(MESSAGES.en.scanned(target), "1 file scanned");
   assert.equal(
     MESSAGES.en.scanned({ ...target, filesScanned: 3, filesExcluded: 2, truncated: true, configFile: "seethru.toml" }),
     "3 files scanned, 2 excluded by seethru.toml, stopped early",
   );
   assert.equal(MESSAGES.ko.scanned({ ...target, filesScanned: 3, filesExcluded: 2 }), "파일 3개 검사, seethru.toml로 2개 제외");
+  assert.equal(MESSAGES.en.scanned(withBuild), "1 file scanned, build output read from dist");
+  assert.equal(MESSAGES.ko.scanned(withBuild), "파일 1개 검사, dist 빌드 결과물 읽음");
 });
 
 test("labels graph nodes in the chosen language", () => {

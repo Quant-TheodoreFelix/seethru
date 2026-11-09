@@ -320,6 +320,14 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "No build output was read, so whether a file reaches the browser is judged from folder names, `\"use client\"` and imports.",
             "빌드 결과물을 읽지 않았기 때문에, 파일이 브라우저로 가는지는 폴더 이름, `\"use client\"`, import로 판단했어요.",
         ),
+        LimitationCode::BuildOutputStale => (
+            "The build output is older than the source code, so it was not used. Build again and rerun the scan.",
+            "빌드 결과물이 소스 코드보다 오래돼서 쓰지 않았어요. 다시 빌드한 뒤 검사하세요.",
+        ),
+        LimitationCode::BuildOutputWithoutSourceMaps => (
+            "Some bundles in the build output have no source map, so only some files could be confirmed. Build with source maps on to confirm the rest.",
+            "빌드 결과물에 소스맵이 없는 번들이 있어서 일부 파일만 확인했어요. 소스맵을 켜고 빌드하면 나머지도 확인할 수 있어요.",
+        ),
         LimitationCode::DashboardPoliciesUnseen => (
             "Tables and policies made in the Supabase dashboard are not in this repo, so they were not checked.",
             "Supabase 대시보드에서 만든 테이블과 정책은 저장소에 없어서 확인하지 못했어요.",

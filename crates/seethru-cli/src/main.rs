@@ -11,6 +11,7 @@ seethru - see through your app before attackers do
 
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
+               [--build-output DIR]
   seethru schema
   seethru --version
 
@@ -23,6 +24,9 @@ Options
   --json       Print the scan report as JSON to stdout instead of writing HTML
   --lang LANG  Language of the summary and the report, en or ko (default is en)
   --no-config  Ignore seethru.toml in the scanned project
+  --build-output DIR
+               Read the Vite or Next build output in DIR, a folder inside the
+               project. seethru never runs the build itself
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -35,6 +39,7 @@ enum Command {
         json: bool,
         lang: Lang,
         read_config: bool,
+        build_output: Option<PathBuf>,
     },
     Schema,
     Version,
@@ -61,9 +66,11 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut json = false;
             let mut lang = Lang::default();
             let mut read_config = true;
+            let mut build_output = None;
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
+                    Long("build-output") => build_output = Some(PathBuf::from(parser.value()?)),
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -90,6 +97,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 json,
                 lang,
                 read_config,
+                build_output,
             })
         }
         "schema" => match parser.next()? {
@@ -146,8 +154,12 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             json,
             lang,
             read_config,
+            build_output,
         } => {
-            let options = seethru_analyzer::ScanOptions { read_config };
+            let options = seethru_analyzer::ScanOptions {
+                read_config,
+                build_output,
+            };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
             if json {
@@ -381,7 +393,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true }) if path.as_os_str() == "."
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None }) if path.as_os_str() == "."
         ));
     }
 
@@ -553,6 +565,22 @@ mod tests {
         assert!(en.contains("No problems found"), "{en}");
         assert!(en.contains("[ACCEPTED] RLS is off"), "{en}");
         assert!(en.contains("reason: Demo table on purpose"), "{en}");
+    }
+
+    #[test]
+    fn scan_accepts_a_build_output_folder() {
+        assert!(matches!(
+            parse(args(&["scan", "app", "--build-output", "app/dist"])),
+            Ok(Command::Scan { build_output: Some(ref dir), .. }) if dir.as_os_str() == "app/dist"
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "app"])),
+            Ok(Command::Scan {
+                build_output: None,
+                ..
+            })
+        ));
+        assert!(parse(args(&["scan", "--build-output"])).is_err());
     }
 
     #[test]

@@ -27,6 +27,7 @@ pub(crate) struct Assigned {
     pub role: FileRole,
     pub basis: Basis,
     pub via: Vec<Hop>,
+    pub built_into: Option<String>,
 }
 
 impl Assigned {
@@ -35,6 +36,16 @@ impl Assigned {
             role,
             basis: Basis::Path,
             via: Vec::new(),
+            built_into: None,
+        }
+    }
+
+    pub(crate) fn by_build(role: FileRole, built_into: Option<String>) -> Self {
+        Self {
+            role,
+            basis: Basis::BuildOutput,
+            via: Vec::new(),
+            built_into,
         }
     }
 }
@@ -53,15 +64,7 @@ enum Reached {
 
 impl Module {
     fn is_fixed(&self) -> bool {
-        matches!(
-            self.role,
-            FileRole::EdgeFunction
-                | FileRole::BuildOutput
-                | FileRole::ServerBuildOutput
-                | FileRole::BuildCache
-                | FileRole::Migration
-                | FileRole::EnvFile
-        )
+        is_fixed(self.role)
     }
 
     fn stays_on_server(&self) -> bool {
@@ -90,6 +93,18 @@ impl Module {
             Basis::Path
         }
     }
+}
+
+pub(crate) fn is_fixed(role: FileRole) -> bool {
+    matches!(
+        role,
+        FileRole::EdgeFunction
+            | FileRole::BuildOutput
+            | FileRole::ServerBuildOutput
+            | FileRole::BuildCache
+            | FileRole::Migration
+            | FileRole::EnvFile
+    )
 }
 
 pub(crate) fn assign(modules: &[Module], resolver: &Resolver<'_>) -> BTreeMap<String, Assigned> {
@@ -165,6 +180,7 @@ fn assigned(
             role,
             basis: modules[position].start_basis(browser),
             via: hops,
+            built_into: None,
         };
     }
     let skip = hops.len().saturating_sub(MAX_HOPS);
@@ -172,6 +188,7 @@ fn assigned(
         role,
         basis: Basis::Imports,
         via: hops.split_off(skip),
+        built_into: None,
     }
 }
 

@@ -195,3 +195,37 @@ test("lists each edge kind in the report once in a fixed order", () => {
   assert.deepEqual(edgeKindsIn({ edges: [...edges] }), ["reads", "usesConfig", "defines"]);
   assert.deepEqual(edgeKindsIn({ edges: [] }), []);
 });
+
+test("reads build output inputs and origins", () => {
+  const report = validReport();
+  const target = report.target as Record<string, unknown>;
+  target.inputs = [{ type: "source" }, { type: "buildOutput", path: ".next", tool: "next" }];
+  const finding = (report.findings as Record<string, unknown>[])[0];
+  report.findings = [{ ...finding, origin: { engine: "seethru", inputs: ["source", "buildOutput"] } }];
+  const parsed = parseScanReport(report);
+  assert.deepEqual(parsed.target.inputs, [{ type: "source" }, { type: "buildOutput", path: ".next", tool: "next" }]);
+  assert.deepEqual(parsed.findings[0]?.origin.inputs, ["source", "buildOutput"]);
+});
+
+test("rejects malformed target inputs", () => {
+  const withInputs = (inputs: unknown) => {
+    const report = validReport();
+    (report.target as Record<string, unknown>).inputs = inputs;
+    return report;
+  };
+  assert.throws(() => parseScanReport(withInputs([{ type: "source", path: "dist" }])), ReportError);
+  assert.throws(() => parseScanReport(withInputs([{ type: "buildOutput", path: "dist", tool: "vite", extra: 1 }])), ReportError);
+  assert.throws(() => parseScanReport(withInputs([{ type: "buildOutput", path: "dist", tool: "webpack" }])), ReportError);
+  assert.throws(() => parseScanReport(withInputs([{ type: "buildOutput", tool: "vite" }])), ReportError);
+  assert.throws(() => parseScanReport(withInputs([{ type: "other" }])), ReportError);
+});
+
+test("reads the build output limitation codes", () => {
+  const report = validReport();
+  (report.target as Record<string, unknown>).limitations = [
+    { code: "buildOutputStale", text: { en: "a", ko: "가" } },
+    { code: "buildOutputWithoutSourceMaps", text: { en: "b", ko: "나" } },
+  ];
+  const codes = parseScanReport(report).target.limitations.map((limitation) => limitation.code);
+  assert.deepEqual(codes, ["buildOutputStale", "buildOutputWithoutSourceMaps"]);
+});

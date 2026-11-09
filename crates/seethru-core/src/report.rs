@@ -52,11 +52,26 @@ pub enum Ecosystem {
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum Input {
     Source {},
+    BuildOutput { path: String, tool: BuildTool },
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum BuildTool {
+    Vite,
+    Next,
 }
 
 #[derive(
@@ -65,6 +80,7 @@ pub enum Input {
 #[serde(rename_all = "camelCase")]
 pub enum InputKind {
     Source,
+    BuildOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -80,6 +96,8 @@ pub struct Limitation {
 #[serde(rename_all = "camelCase")]
 pub enum LimitationCode {
     BuildOutputNotRead,
+    BuildOutputStale,
+    BuildOutputWithoutSourceMaps,
     DashboardPoliciesUnseen,
 }
 
@@ -577,6 +595,14 @@ impl Origin {
         Self {
             engine: "seethru".to_owned(),
             inputs: vec![InputKind::Source],
+            rule: None,
+        }
+    }
+
+    pub fn seethru_with_build_output() -> Self {
+        Self {
+            engine: "seethru".to_owned(),
+            inputs: vec![InputKind::Source, InputKind::BuildOutput],
             rule: None,
         }
     }

@@ -144,10 +144,11 @@ const en: Messages = {
   principal: "Principal",
   config: "Config",
   service: "Service",
-  scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
+  scanned: ({ filesScanned, filesExcluded, truncated, configFile, inputs }) =>
     [
       `${filesScanned} ${filesScanned === 1 ? "file" : "files"} scanned`,
       filesExcluded > 0 ? `${filesExcluded} excluded by ${configFile ?? "seethru.toml"}` : "",
+      ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`build output read from ${input.path}`] : [])),
       truncated ? "stopped early" : "",
     ]
       .filter(Boolean)
@@ -251,10 +252,11 @@ const ko: Messages = {
   principal: "권한 주체",
   config: "설정",
   service: "바깥 서비스",
-  scanned: ({ filesScanned, filesExcluded, truncated, configFile }) =>
+  scanned: ({ filesScanned, filesExcluded, truncated, configFile, inputs }) =>
     [
       `파일 ${filesScanned}개 검사`,
       filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
+      ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`${input.path} 빌드 결과물 읽음`] : [])),
       truncated ? "일부만 검사함" : "",
     ]
       .filter(Boolean)

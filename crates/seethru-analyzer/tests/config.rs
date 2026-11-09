@@ -52,7 +52,13 @@ fn project_config_excludes_paths_and_accepts_findings_but_keeps_them_visible() {
     assert_eq!(report.summary.critical, 1);
     assert_eq!(report.summary.medium, 0);
 
-    let ignored = seethru_analyzer::scan_with(&project.root, ScanOptions { read_config: false });
+    let ignored = seethru_analyzer::scan_with(
+        &project.root,
+        ScanOptions {
+            read_config: false,
+            ..ScanOptions::default()
+        },
+    );
     assert!(ignored.is_ok(), "{ignored:?}");
     let Ok(ignored) = ignored else { return };
     assert_eq!(ignored.target.files_excluded, 0);

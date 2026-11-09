@@ -192,6 +192,14 @@ impl ProjectHints {
         found
     }
 
+    pub(crate) fn next_root_for(&self, rel_dir: &str) -> Option<&str> {
+        deepest_root(&self.next_roots, rel_dir)
+    }
+
+    pub(crate) fn vite_root_for(&self, rel_dir: &str) -> Option<&str> {
+        deepest_root(&self.vite_roots, rel_dir)
+    }
+
     pub(crate) fn roots(&self) -> Vec<String> {
         self.next_roots
             .iter()

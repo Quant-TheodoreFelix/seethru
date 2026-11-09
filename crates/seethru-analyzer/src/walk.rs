@@ -37,6 +37,15 @@ pub(crate) fn walk(
     wanted: impl Fn(&str) -> bool,
     excluded: impl Fn(&str) -> bool,
 ) -> Result<Walk, ScanError> {
+    walk_with(root, wanted, excluded, MAX_FILE_BYTES)
+}
+
+pub(crate) fn walk_with(
+    root: &Path,
+    wanted: impl Fn(&str) -> bool,
+    excluded: impl Fn(&str) -> bool,
+    max_file_bytes: u64,
+) -> Result<Walk, ScanError> {
     let mut out = Walk {
         entries: Vec::new(),
         skipped: 0,
@@ -95,7 +104,7 @@ pub(crate) fn walk(
                     out.excluded = out.excluded.saturating_add(1);
                     continue;
                 }
-                if meta.len() > MAX_FILE_BYTES {
+                if meta.len() > max_file_bytes {
                     out.skipped = out.skipped.saturating_add(1);
                     continue;
                 }
@@ -118,17 +127,22 @@ fn finish(mut walk: Walk) -> Walk {
     walk
 }
 
-pub(crate) fn read_text(path: &Path) -> Option<String> {
+pub(crate) fn read_bytes(path: &Path, max_bytes: u64) -> Option<Vec<u8>> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() || meta.len() > max_bytes {
+        return None;
+    }
     let file = File::open(path).ok()?;
-    let meta = file.metadata().ok()?;
-    if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
-        return None;
-    }
     let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes).ok()?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    file.take(max_bytes + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > max_bytes {
         return None;
     }
+    Some(bytes)
+}
+
+pub(crate) fn read_text(path: &Path) -> Option<String> {
+    let bytes = read_bytes(path, MAX_FILE_BYTES)?;
     let probe = &bytes[..bytes.len().min(BINARY_PROBE_BYTES)];
     if probe.contains(&0) {
         return None;

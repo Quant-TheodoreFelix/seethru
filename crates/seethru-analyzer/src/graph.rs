@@ -14,6 +14,7 @@ pub(crate) struct Verdict {
     pub rule: RuleId,
     pub severity: Severity,
     pub confidence: Confidence,
+    pub from_build: bool,
 }
 
 #[derive(Default)]
@@ -106,6 +107,7 @@ impl Graph {
             rule,
             severity,
             confidence,
+            from_build,
         } = verdict;
         let id = format!("{}:{}", rule.as_str(), node);
         self.findings.entry(id.clone()).or_insert(Finding {
@@ -118,7 +120,11 @@ impl Graph {
             node,
             location,
             evidence,
-            origin: Origin::seethru(),
+            origin: if from_build {
+                Origin::seethru_with_build_output()
+            } else {
+                Origin::seethru()
+            },
             cwe: rule.cwe().to_vec(),
             proof: None,
             fix_prompt: None,

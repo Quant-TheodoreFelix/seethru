@@ -62,6 +62,13 @@
       ],
       "type": "string"
     },
+    "BuildTool": {
+      "enum": [
+        "vite",
+        "next"
+      ],
+      "type": "string"
+    },
     "Channel": {
       "enum": [
         "httpRoute",
@@ -356,12 +363,34 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "tool": {
+              "$ref": "#/$defs/BuildTool"
+            },
+            "type": {
+              "const": "buildOutput",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "tool"
+          ],
+          "type": "object"
         }
       ]
     },
     "InputKind": {
       "enum": [
-        "source"
+        "source",
+        "buildOutput"
       ],
       "type": "string"
     },
@@ -384,6 +413,8 @@
     "LimitationCode": {
       "enum": [
         "buildOutputNotRead",
+        "buildOutputStale",
+        "buildOutputWithoutSourceMaps",
         "dashboardPoliciesUnseen"
       ],
       "type": "string"

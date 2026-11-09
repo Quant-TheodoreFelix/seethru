@@ -71,10 +71,15 @@ export type EdgeKind = (typeof EDGE_KINDS)[number];
 const ECOSYSTEMS = ["next", "vite", "supabase"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source"] as const;
+const INPUT_KINDS = ["source", "buildOutput"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "dashboardPoliciesUnseen"] as const;
+const BUILD_TOOLS = ["vite", "next"] as const;
+export type BuildTool = (typeof BUILD_TOOLS)[number];
+
+export type TargetInput = { type: "source" } | { type: "buildOutput"; path: string; tool: BuildTool };
+
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -169,7 +174,7 @@ export interface ScanReport {
     truncated: boolean;
     configFile?: string;
     ecosystems: Ecosystem[];
-    inputs: { type: InputKind }[];
+    inputs: TargetInput[];
     limitations: Limitation[];
   };
   summary: Record<Severity, number> & { accepted: number };
@@ -448,9 +453,15 @@ export function parseScanReport(input: unknown): ScanReport {
       ecosystems: list(target.ecosystems, "report.target.ecosystems", MAX_LIST).map((value, i) =>
         oneOf(value, `report.target.ecosystems[${i}]`, ECOSYSTEMS),
       ),
-      inputs: list(target.inputs, "report.target.inputs", MAX_LIST).map((value, i) => {
-        const o = object(value, `report.target.inputs[${i}]`, ["type"]);
-        return { type: oneOf(o.type, `report.target.inputs[${i}].type`, INPUT_KINDS) };
+      inputs: list(target.inputs, "report.target.inputs", MAX_LIST).map((value, i): TargetInput => {
+        const path = `report.target.inputs[${i}]`;
+        const kind = oneOf(tagOf(value, path), `${path}.type`, INPUT_KINDS);
+        if (kind === "source") {
+          object(value, path, ["type"]);
+          return { type: "source" };
+        }
+        const o = object(value, path, ["type", "path", "tool"]);
+        return { type: "buildOutput", path: text(o.path, `${path}.path`), tool: oneOf(o.tool, `${path}.tool`, BUILD_TOOLS) };
       }),
       limitations: list(target.limitations, "report.target.limitations", MAX_LIST).map((value, i): Limitation => {
         const path = `report.target.limitations[${i}]`;
