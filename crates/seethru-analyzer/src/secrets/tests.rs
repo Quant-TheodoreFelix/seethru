@@ -10,9 +10,13 @@ fn random_body(len: usize) -> String {
 }
 
 fn jwt(role: &str) -> String {
+    jwt_from("supabase", role)
+}
+
+fn jwt_from(issuer: &str, role: &str) -> String {
     let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
     let payload =
-        format!(r#"{{"iss":"supabase","ref":"seethrutestonly","role":"{role}","iat":1,"exp":2}}"#);
+        format!(r#"{{"iss":"{issuer}","ref":"seethrutestonly","role":"{role}","iat":1,"exp":2}}"#);
     let payload = URL_SAFE_NO_PAD.encode(payload.as_bytes());
     format!("{header}.{payload}.{}", random_body(43))
 }
@@ -74,6 +78,12 @@ fn detects_supabase_service_role_jwt_but_not_anon_key() {
     );
     assert!(kinds(&jwt("anon")).is_empty());
     assert!(kinds("eyJhbGciOi.not-a-jwt.x").is_empty());
+}
+
+#[test]
+fn ignores_the_supabase_local_demo_key() {
+    let demo = jwt_from(&["supabase", "-demo"].concat(), "service_role");
+    assert!(kinds(&format!("service_role_key TEXT := '{demo}';")).is_empty());
 }
 
 #[test]

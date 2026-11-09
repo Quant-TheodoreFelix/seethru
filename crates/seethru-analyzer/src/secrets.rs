@@ -26,6 +26,7 @@ const LOCAL_DB_HOSTS: &[&str] = &[
     "postgres",
 ];
 const MAX_JWT_SEGMENT: usize = 8192;
+const LOCAL_DEMO_ISSUER: &str = "supabase-demo";
 const MAX_PEM_LABEL: usize = 40;
 const MAX_PEM_SCAN: usize = 8192;
 const MIN_PEM_PAYLOAD: usize = 64;
@@ -264,6 +265,9 @@ fn jwt_hit(text: &str, offset: usize) -> Option<Hit> {
     header.get("alg")?;
     let payload: serde_json::Value = decode_segment(payload)?;
     if payload.get("role")?.as_str()? != "service_role" {
+        return None;
+    }
+    if payload.get("iss").and_then(serde_json::Value::as_str) == Some(LOCAL_DEMO_ISSUER) {
         return None;
     }
     Some(Hit {
