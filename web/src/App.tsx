@@ -100,7 +100,7 @@ export function App() {
 
 function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
   return (
-    <ul className="theme-switch" aria-label="Color theme">
+    <ul className="switch" aria-label="Color theme">
       {THEMES.map((option) => (
         <li key={option}>
           <button type="button" aria-pressed={theme === option} onClick={() => onChange(option)}>
@@ -244,7 +244,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
             const count = report.summary[severity];
             return (
               <div key={severity} className={`summary-cell sev-${severity} ${count > 0 ? "has-findings" : "is-zero"}`}>
-                <dt className="eyebrow">{SEVERITY_LABEL[severity]}</dt>
+                <dt className="tag">{SEVERITY_LABEL[severity]}</dt>
                 <dd>{count}</dd>
               </div>
             );
@@ -285,7 +285,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
               >
                 <div className="fix-panel-head">
                   <SeverityTag severity={selected.severity} />
-                  <button type="button" className="button" onClick={clear}>
+                  <button type="button" className="button quiet" onClick={clear}>
                     Close
                   </button>
                 </div>

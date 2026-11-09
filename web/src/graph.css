@@ -1,20 +1,20 @@
 .react-flow {
-  --xy-background-color: var(--bg);
+  --xy-background-color: var(--plate);
   --xy-background-pattern-color: var(--grid);
-  --xy-edge-stroke: var(--ink);
-  --xy-edge-stroke-selected: var(--ink);
-  --xy-edge-stroke-width: 1.5;
-  --xy-controls-button-background-color: var(--surface);
-  --xy-controls-button-background-color-hover: var(--bg);
+  --xy-edge-stroke: var(--edge);
+  --xy-edge-stroke-selected: var(--edge);
+  --xy-edge-stroke-width: 1.25;
+  --xy-controls-button-background-color: var(--raised);
+  --xy-controls-button-background-color-hover: var(--hover);
   --xy-controls-button-color: var(--ink);
   --xy-controls-button-color-hover: var(--ink);
-  --xy-controls-button-border-color: var(--rule);
-  --xy-controls-box-shadow: 3px 3px 0 var(--shadow);
-  --xy-minimap-background-color: var(--surface);
-  --xy-minimap-mask-background-color: color-mix(in srgb, var(--ink) 12%, transparent);
-  --xy-minimap-mask-stroke-color: var(--rule);
-  --xy-minimap-mask-stroke-width: 2;
-  --xy-minimap-node-background-color: color-mix(in srgb, var(--ink) 30%, transparent);
+  --xy-controls-button-border-color: transparent;
+  --xy-controls-box-shadow: none;
+  --xy-minimap-background-color: var(--raised);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+  --xy-minimap-mask-stroke-color: transparent;
+  --xy-minimap-mask-stroke-width: 0;
+  --xy-minimap-node-background-color: color-mix(in srgb, var(--ink) 18%, transparent);
   font-family: var(--font-serif);
 }
 
@@ -24,29 +24,32 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   width: 248px;
   height: 72px;
-  padding: 0 14px;
-  border: var(--border) solid var(--rule);
-  background: var(--surface);
+  padding: 0 16px;
+  background: var(--raised);
   color: var(--ink);
-  transition: box-shadow 120ms ease-out;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
 }
 
 .node.has-finding {
-  box-shadow: 5px 5px 0 var(--sev);
+  background: color-mix(in srgb, var(--sev) 15%, var(--raised));
 }
 
 .node.is-selected {
-  background: var(--select-bg);
-  color: var(--select-ink);
-  box-shadow: 7px 7px 0 var(--sev, var(--shadow));
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
-.node-envVar,
-.node-secret {
-  border-style: dashed;
+.node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .node-kind {
@@ -57,10 +60,6 @@
   text-overflow: ellipsis;
 }
 
-.node.is-selected .node-kind {
-  color: inherit;
-}
-
 .node-label {
   overflow: hidden;
   font-size: 17px;
@@ -69,10 +68,21 @@
   text-overflow: ellipsis;
 }
 
+.node-envVar .node-label,
+.node-secret .node-label {
+  font-weight: 400;
+  font-style: italic;
+  font-synthesis-style: none;
+}
+
 .node-badge {
-  position: absolute;
-  top: -11px;
-  right: 12px;
+  flex: none;
+  font-size: 10px;
+}
+
+.node.is-selected .node-kind,
+.node.is-selected .node-badge {
+  color: inherit;
 }
 
 .react-flow__handle {
@@ -82,12 +92,12 @@
 .react-flow__edge.edge-defines .react-flow__edge-path,
 .legend-line.edge-defines {
   stroke-width: 1;
-  stroke-opacity: 0.5;
+  stroke-opacity: 0.55;
 }
 
 .react-flow__edge.edge-writes .react-flow__edge-path,
 .legend-line.edge-writes {
-  stroke-width: 3;
+  stroke-width: 2.75;
 }
 
 .react-flow__edge.edge-reads .react-flow__edge-path,
@@ -107,27 +117,21 @@
 }
 
 .react-flow__arrowhead polyline {
-  stroke: var(--ink) !important;
-  fill: var(--ink) !important;
+  stroke: var(--edge) !important;
+  fill: var(--edge) !important;
 }
 
 .react-flow__controls {
-  border: var(--border) solid var(--rule);
+  gap: 1px;
 }
 
 .react-flow__controls-button {
   width: 30px;
   height: 30px;
-  border-bottom: var(--border) solid var(--rule);
-}
-
-.react-flow__controls-button:last-child {
-  border-bottom: 0;
 }
 
 .react-flow__minimap {
-  border: var(--border) solid var(--rule);
-  box-shadow: 3px 3px 0 var(--shadow);
+  box-shadow: none;
 }
 
 .react-flow__minimap-node.sev-critical { fill: var(--critical); }
@@ -143,12 +147,11 @@
 .legend ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: 4px 18px;
   margin: 0;
   padding: 6px 12px 5px;
-  border: var(--border) solid var(--rule);
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--plate);
+  color: var(--muted);
   font-size: 13px;
   list-style: none;
 }
@@ -156,13 +159,13 @@
 .legend li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   white-space: nowrap;
 }
 
 .legend-line {
-  stroke: var(--ink);
-  stroke-width: 1.5;
+  stroke: var(--edge);
+  stroke-width: 1.25;
 }
 
 @media (max-width: 860px) {

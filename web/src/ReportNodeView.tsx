@@ -11,16 +11,18 @@ export function ReportNodeView({ data, selected }: NodeProps<GraphNode>) {
   return (
     <div className={classes.join(" ")}>
       <Handle type="target" position={Position.Left} isConnectable={false} />
-      <div className="node-kind">{kindLabel(node.kind)}</div>
+      <div className="node-head">
+        <span className="node-kind">{kindLabel(node.kind)}</span>
+        {severity ? (
+          <span className={`node-badge tag sev-${severity}`}>
+            {SEVERITY_LABEL[severity]}
+            {findingCount > 1 ? ` ${findingCount}` : ""}
+          </span>
+        ) : null}
+      </div>
       <div className="node-label" title={node.label}>
         {node.label}
       </div>
-      {severity ? (
-        <span className={`node-badge tag sev-${severity}`}>
-          {SEVERITY_LABEL[severity]}
-          {findingCount > 1 ? ` ${findingCount}` : ""}
-        </span>
-      ) : null}
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>
   );

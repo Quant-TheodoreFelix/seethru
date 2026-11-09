@@ -1,29 +1,31 @@
 :root {
   color-scheme: light;
   --bg: #faf9f5;
-  --surface: #ffffff;
+  --plate: #f1efe8;
+  --raised: #ffffff;
+  --hover: #f1efe8;
   --ink: #141413;
   --muted: #5e5d58;
-  --rule: #141413;
-  --shadow: #141413;
-  --code-bg: rgb(20 20 19 / 0.08);
-  --grid: rgb(20 20 19 / 0.18);
-  --select-bg: #b6dfee;
-  --select-ink: #141413;
-  --sev-ink: #141413;
-  --critical: #ff6b4a;
-  --high: #ff9f43;
-  --medium: #ffd84d;
-  --low: #9fe3b4;
-  --info: #dcdcd6;
+  --faint: #8a8880;
+  --edge: #8d8b84;
+  --code-bg: rgb(20 20 19 / 0.06);
+  --grid: rgb(20 20 19 / 0.16);
+  --accent: #b6dfee;
+  --accent-ink: #141413;
+  --button-bg: #141413;
+  --button-ink: #faf9f5;
+  --critical: #cf3f24;
+  --high: #dd7426;
+  --medium: #c9961a;
+  --low: #5a8f63;
+  --info: #9a988f;
   --font-serif: "Times New Roman", Times, "Liberation Serif", Tinos, "Nimbus Roman", AppleMyungjo,
     "Nanum Myeongjo", "Noto Serif KR", "Noto Serif CJK KR", Batang, serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", "Nanum Gothic Coding", monospace;
-  --border: 2px;
-  --gutter: 20px;
+  --gutter: 24px;
   font-family: var(--font-serif);
   font-size: 16px;
-  line-height: 1.45;
+  line-height: 1.5;
   font-kerning: normal;
   font-variant-numeric: lining-nums tabular-nums;
   color: var(--ink);
@@ -35,30 +37,44 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #141413;
-    --surface: #1f1f1d;
-    --ink: #ecebe4;
-    --muted: #a3a29a;
-    --rule: #ecebe4;
-    --shadow: #b6dfee;
-    --code-bg: rgb(236 235 228 / 0.1);
-    --grid: rgb(236 235 228 / 0.22);
-    --select-bg: #b6dfee;
-    --select-ink: #141413;
+    --plate: #1b1b19;
+    --raised: #252522;
+    --hover: #1e1e1c;
+    --ink: #eeece4;
+    --muted: #a6a49c;
+    --faint: #77756e;
+    --edge: #8a8881;
+    --code-bg: rgb(238 236 228 / 0.08);
+    --grid: rgb(238 236 228 / 0.12);
+    --button-bg: #eeece4;
+    --button-ink: #141413;
+    --critical: #f0674b;
+    --high: #f39a4f;
+    --medium: #f0c955;
+    --low: #8fc495;
+    --info: #a8a69e;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #141413;
-  --surface: #1f1f1d;
-  --ink: #ecebe4;
-  --muted: #a3a29a;
-  --rule: #ecebe4;
-  --shadow: #b6dfee;
-  --code-bg: rgb(236 235 228 / 0.1);
-  --grid: rgb(236 235 228 / 0.22);
-  --select-bg: #b6dfee;
-  --select-ink: #141413;
+  --plate: #1b1b19;
+  --raised: #252522;
+  --hover: #1e1e1c;
+  --ink: #eeece4;
+  --muted: #a6a49c;
+  --faint: #77756e;
+  --edge: #8a8881;
+  --code-bg: rgb(238 236 228 / 0.08);
+  --grid: rgb(238 236 228 / 0.12);
+  --button-bg: #eeece4;
+  --button-ink: #141413;
+  --critical: #f0674b;
+  --high: #f39a4f;
+  --medium: #f0c955;
+  --low: #8fc495;
+  --info: #a8a69e;
 }
 
 html,
@@ -73,13 +89,13 @@ body {
 }
 
 ::selection {
-  background: var(--select-bg);
-  color: var(--select-ink);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 :focus-visible {
-  outline: 3px solid var(--shadow);
-  outline-offset: 2px;
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
 }
 
 h1,
@@ -87,13 +103,13 @@ h2,
 h3,
 h4 {
   font-weight: 400;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.01em;
 }
 
 code {
   font-family: var(--font-mono);
   font-size: 0.84em;
-  padding: 0.05em 0.3em;
+  padding: 0.08em 0.32em;
   background: var(--code-bg);
   overflow-wrap: anywhere;
 }
@@ -104,94 +120,98 @@ code {
 .sev-low { --sev: var(--low); }
 .sev-info { --sev: var(--info); }
 
-.eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .tag {
-  display: inline-block;
-  padding: 1px 6px 0;
-  border: 1.5px solid var(--sev-ink);
-  background: var(--sev);
-  color: var(--sev-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  line-height: 17px;
+  letter-spacing: 0.16em;
+  line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
+.tag::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sev);
+}
+
 .button {
-  padding: 5px 14px 4px;
-  border: var(--border) solid var(--rule);
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 3px 3px 0 var(--shadow);
+  padding: 8px 16px 7px;
+  border: 0;
+  background: var(--button-bg);
+  color: var(--button-ink);
   font: inherit;
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
   text-transform: uppercase;
   cursor: pointer;
-  transition:
-    transform 80ms ease-out,
-    box-shadow 80ms ease-out;
+  transition: opacity 120ms ease-out;
 }
 
 .button:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 4px 4px 0 var(--shadow);
+  opacity: 0.82;
 }
 
-.button:active {
-  transform: translate(3px, 3px);
-  box-shadow: 0 0 0 var(--shadow);
+.button.quiet {
+  padding: 4px 0;
+  background: transparent;
+  color: var(--muted);
 }
 
-.theme-switch {
+.button.quiet:hover {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.switch {
   display: inline-flex;
+  gap: 2px;
   margin: 0;
   padding: 0;
-  border: var(--border) solid var(--rule);
   list-style: none;
 }
 
-.theme-switch li + li {
-  border-left: var(--border) solid var(--rule);
-}
-
-.theme-switch button {
-  padding: 4px 10px 3px;
+.switch button {
+  padding: 4px 8px 3px;
   border: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--muted);
   font: inherit;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   cursor: pointer;
+  transition:
+    color 120ms ease-out,
+    background-color 120ms ease-out;
 }
 
-.theme-switch button[aria-pressed="true"] {
-  background: var(--select-bg);
-  color: var(--select-ink);
+.switch button:hover {
+  color: var(--ink);
+}
+
+.switch button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 .error {
   margin: 0;
-  padding: 8px 12px;
-  border: var(--border) solid var(--rule);
-  background: var(--critical);
-  color: var(--sev-ink);
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--critical) 16%, var(--bg));
+  color: var(--ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .button {
+  .button,
+  .switch button {
     transition: none;
   }
 }
