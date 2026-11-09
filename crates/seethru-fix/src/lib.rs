@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use seethru_core::{
-    AccessRuleDetail, CredentialDetail, DataStoreDetail, EdgeKind, Finding, Lang, LocalizedText,
-    Location, Node, NodeKind, PolicyCommand, RuleId, ScanReport, SecretKind,
+    AccessRuleDetail, CredentialDetail, DataStoreDetail, EdgeKind, Exposure, Finding, Lang,
+    LocalizedText, Location, Node, NodeKind, PolicyCommand, RuleId, ScanReport, SecretKind,
 };
 
 const MAX_NAME_CHARS: usize = 120;
@@ -96,6 +96,15 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             let view = format!("{}.{}", clean(schema), clean(name));
             let users = related_files(report, finding, &[EdgeKind::Reads, EdgeKind::Writes], lang);
             view_bypasses_rls(&view, *materialized, &place, &users, lang)
+        }
+        (RuleId::SupabaseFunctionBypassesRls, Some(NodeKind::EntryPoint { exposure, .. })) => {
+            let function = finding
+                .node
+                .as_str()
+                .strip_prefix("entry:rpc:")
+                .map(clean)
+                .unwrap_or_else(|| clean(label));
+            function_bypasses_rls(&function, *exposure == Exposure::Public, &place, lang)
         }
         (
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
@@ -270,6 +279,37 @@ fn view_bypasses_rls(
              2. 앱에서 이 행이 필요하다면 `security_invoker = true`인 일반 뷰나 부른 사람을 확인하는 함수를 거쳐 읽게 해 줘.\n\
              3. 이미 적용된 마이그레이션 파일은 고치지 마."
         ),
+    }
+}
+
+fn function_bypasses_rls(function: &str, anyone: bool, place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => {
+            let who = if anyone {
+                "anyone, even without signing in,"
+            } else {
+                "any signed-in user"
+            };
+            format!(
+                "The Supabase function `{function}` is made with `security definer`, so it runs with the rights of the account that created it and RLS does not apply inside it, and {who} can call it with `rpc()`.{place}\n\
+                 1. Find where this function is used. If only triggers, policies or other database functions use it, create a new migration file that adds `revoke execute on function {function} from public, anon, authenticated;`. Revoking from `anon` alone is not enough, because `public` still keeps the right.\n\
+                 2. If the app calls it with `rpc()`, either change it to `security invoker` so RLS applies, or make the function check the caller with `auth.uid()` before it reads or changes anything. Add `set search_path = ''` while you are there.\n\
+                 3. Do not edit migration files that have already been applied."
+            )
+        }
+        Lang::Ko => {
+            let who = if anyone {
+                "로그인하지 않은 사람을 포함한 누구나"
+            } else {
+                "로그인한 사용자라면 누구나"
+            };
+            format!(
+                "Supabase 함수 `{function}`는 `security definer`로 만들어져서 만든 계정의 권한으로 실행되고 함수 안에서는 RLS가 적용되지 않는데, {who} `rpc()`로 이 함수를 부를 수 있어.{place}\n\
+                 1. 이 함수를 어디서 쓰는지 찾아 줘. 트리거, 정책, 다른 DB 함수에서만 쓴다면 새 마이그레이션 파일을 만들어서 `revoke execute on function {function} from public, anon, authenticated;`를 추가해 줘. `anon`에서만 거두면 `public`에 권한이 남아 있어서 소용없어.\n\
+                 2. 앱이 `rpc()`로 부른다면 `security invoker`로 바꿔 RLS가 적용되게 하거나, 함수가 데이터를 읽고 고치기 전에 `auth.uid()`로 부른 사람을 확인하게 해 줘. 이때 `set search_path = ''`도 추가해 줘.\n\
+                 3. 이미 적용된 마이그레이션 파일은 고치지 마."
+            )
+        }
     }
 }
 

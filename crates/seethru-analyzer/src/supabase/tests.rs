@@ -1,6 +1,6 @@
 use seethru_core::{
-    AccessRuleDetail, BucketVisibility, Confidence, DataStoreDetail, EdgeKind, NodeKind,
-    PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, TargetInfo,
+    AccessRuleDetail, BucketVisibility, Channel, Confidence, DataStoreDetail, EdgeKind, Exposure,
+    NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, TargetInfo,
 };
 
 use super::Migrations;
@@ -476,5 +476,124 @@ fn views_that_skip_rls_are_reported_by_who_can_read_them() {
             Some("table:public.order_totals"),
             Some("table:public.orders")
         ]
+    );
+}
+
+#[test]
+fn security_definer_functions_are_reported_by_who_can_call_them() {
+    let report = run(&[(
+        API,
+        &format!(
+            "{TABLES}
+             create function public.all_orders() returns setof public.orders
+               language sql security definer as $$ select * from public.orders $$;
+             create function public.staff_orders() returns setof public.orders
+               language sql security definer as $$ select * from public.orders $$;
+             revoke execute on function public.staff_orders from public, anon;
+             create function public.internal_orders() returns setof public.orders
+               language sql security definer as $$ select * from public.orders $$;
+             revoke execute on function public.internal_orders() from public, anon, authenticated;
+             create function public.anon_revoked() returns int
+               language sql security definer as $$ select 1 $$;
+             revoke execute on function public.anon_revoked from anon;
+             create function public.is_owner(order_id bigint) returns boolean
+               language sql security definer as $$
+                 select exists (select 1 from public.orders where id = order_id and user_id = auth.uid())
+               $$;
+             create function public.owner_orders(order_id bigint) returns void
+               language plpgsql security definer as $$
+               begin
+                 if not public.is_owner(order_id) then raise exception 'no'; end if;
+                 delete from public.orders where id = order_id;
+               end $$;
+             create function public.order_exists(order_id bigint) returns boolean
+               language sql security definer as $$
+                 select exists (select 1 from public.orders where id = order_id)
+               $$;
+             create function public.order_flags() returns boolean[]
+               language sql security definer as $$ select array[true] $$;
+             create function public.handle_new_user() returns trigger
+               language plpgsql security definer as $$ begin return new; end $$;
+             create function public.count_orders() returns bigint
+               language sql as $$ select count(*) from public.orders $$;"
+        ),
+    )]);
+    let rule = RuleId::SupabaseFunctionBypassesRls;
+    let verdict = |id: &str| finding(&report, rule, id).map(|f| (f.severity, f.confidence));
+    assert_eq!(
+        verdict("entry:rpc:public.all_orders"),
+        Some((Severity::High, Confidence::Likely))
+    );
+    assert_eq!(
+        verdict("entry:rpc:public.staff_orders"),
+        Some((Severity::Medium, Confidence::Likely))
+    );
+    assert_eq!(verdict("entry:rpc:public.internal_orders"), None);
+    assert_eq!(
+        verdict("entry:rpc:public.anon_revoked"),
+        Some((Severity::High, Confidence::Likely))
+    );
+    assert_eq!(
+        verdict("entry:rpc:public.is_owner"),
+        Some((Severity::Low, Confidence::Review))
+    );
+    assert_eq!(
+        verdict("entry:rpc:public.owner_orders"),
+        Some((Severity::Low, Confidence::Review))
+    );
+    assert_eq!(
+        verdict("entry:rpc:public.order_exists"),
+        Some((Severity::Low, Confidence::Review))
+    );
+    assert_eq!(
+        verdict("entry:rpc:public.order_flags"),
+        Some((Severity::High, Confidence::Likely))
+    );
+    assert!(node_kind(&report, "entry:rpc:public.handle_new_user").is_none());
+    assert_eq!(verdict("entry:rpc:public.count_orders"), None);
+    assert_eq!(
+        node_kind(&report, "entry:rpc:public.internal_orders"),
+        Some(&NodeKind::EntryPoint {
+            channel: Channel::Rpc,
+            exposure: Exposure::Internal
+        })
+    );
+    assert!(has_edge(
+        &report,
+        "entry:rpc:public.internal_orders",
+        "principal:supabase:postgres",
+        EdgeKind::ActsAs
+    ));
+    assert!(!has_edge(
+        &report,
+        "entry:rpc:public.count_orders",
+        "principal:supabase:postgres",
+        EdgeKind::ActsAs
+    ));
+    assert!(has_edge(
+        &report,
+        "entry:rpc:public.count_orders",
+        "file:supabase/migrations/3_api.sql",
+        EdgeKind::Invokes
+    ));
+}
+
+#[test]
+fn functions_owned_by_other_roles_or_in_private_schemas_are_not_reported() {
+    let report = run(&[(
+        API,
+        "create function public.limited() returns int language sql security definer as $$ select 1 $$;
+         alter function public.limited() owner to app_reader;
+         create schema private;
+         create function private.helper() returns int language sql security definer as $$ select 1 $$;
+         create function public.later() returns int language sql as $$ select 1 $$;
+         alter function public.later() security definer;",
+    )]);
+    let rule = RuleId::SupabaseFunctionBypassesRls;
+    assert!(finding(&report, rule, "entry:rpc:public.limited").is_none());
+    assert!(node_kind(&report, "entry:rpc:private.helper").is_none());
+    assert_eq!(
+        finding(&report, rule, "entry:rpc:public.later").map(|f| f.severity),
+        Some(Severity::High)
     );
 }

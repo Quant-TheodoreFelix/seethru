@@ -164,6 +164,66 @@ fn who(anyone: bool) -> (&'static str, &'static str) {
     }
 }
 
+pub(crate) struct FunctionFacts {
+    pub anyone: bool,
+    pub checks_caller: bool,
+    pub yes_or_no: bool,
+}
+
+pub(crate) fn function_bypasses_rls(function: &str, facts: &FunctionFacts) -> Text {
+    let function = display_name(function);
+    let (who_en, who_ko) = who(facts.anyone);
+    let (title_en, title_ko) = if facts.anyone {
+        (
+            format!("Anyone can call the `{function}` function, which skips RLS"),
+            format!("누구나 RLS를 건너뛰는 `{function}` 함수를 부를 수 있어요"),
+        )
+    } else {
+        (
+            format!("Any signed-in user can call the `{function}` function, which skips RLS"),
+            format!("로그인한 사용자라면 누구나 RLS를 건너뛰는 `{function}` 함수를 부를 수 있어요"),
+        )
+    };
+    let (caller_en, caller_ko) = if facts.checks_caller {
+        (
+            "The function looks at who is calling it, for example with `auth.uid()`, so it may already be safe. Check that it refuses callers who should not use it.",
+            "이 함수는 `auth.uid()` 같은 방법으로 누가 부르는지 확인하고 있어서 이미 안전할 수도 있어요. 쓰면 안 되는 사람이 부르면 거절하는지 확인하세요.",
+        )
+    } else if facts.yes_or_no {
+        (
+            "The function only answers yes or no, so callers learn little from one call, but they can still use it to find out whether rows they cannot see exist.",
+            "이 함수는 예 또는 아니오만 돌려줘서 한 번 불러서 알 수 있는 것은 적지만, 볼 수 없는 행이 있는지 알아내는 데는 쓸 수 있어요.",
+        )
+    } else {
+        (
+            "The function does not check who is calling it, so callers can use it to read or change data that RLS would block.",
+            "이 함수는 누가 부르는지 확인하지 않아서, RLS가 막는 데이터도 이 함수를 거치면 읽거나 고칠 수 있어요.",
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: title_en,
+            ko: title_ko,
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "This function is made with `security definer`, so it runs with the rights of the account that created it, \
+                 and RLS does not apply to anything it reads or changes. {} can call it through the Supabase API with `rpc()`. \
+                 {caller_en} If only the database itself should use the function, for example a trigger or a policy, \
+                 take away the right to call it from outside. Otherwise make it `security invoker` so RLS applies, \
+                 or check the caller inside the function.",
+                capitalized(who_en)
+            ),
+            ko: format!(
+                "이 함수는 `security definer`로 만들어져서 만든 계정의 권한으로 실행되고, 함수 안에서 읽고 고치는 데이터에는 RLS가 적용되지 않아요. \
+                 {who_ko} Supabase API의 `rpc()`로 이 함수를 부를 수 있어요. {caller_ko} \
+                 트리거나 정책처럼 데이터베이스 안에서만 쓰는 함수라면 바깥에서 부를 수 없게 실행 권한을 거두세요. \
+                 그렇지 않다면 `security invoker`로 바꿔 RLS가 적용되게 하거나, 함수 안에서 부른 사람을 확인하세요."
+            ),
+        },
+    }
+}
+
 pub(crate) struct ViewFacts {
     pub anyone: bool,
     pub materialized: bool,
@@ -503,9 +563,10 @@ mod tests {
     use seethru_core::{PolicyCommand, SecretKind};
 
     use super::{
-        Text, ViewFacts, display_name, policy_unrestricted, rls_disabled, secret_in_browser,
-        secret_in_public_env, secret_in_source, service_role_in_browser,
-        storage_policy_unrestricted, table_schema_missing, view_bypasses_rls,
+        FunctionFacts, Text, ViewFacts, display_name, function_bypasses_rls, policy_unrestricted,
+        rls_disabled, secret_in_browser, secret_in_public_env, secret_in_source,
+        service_role_in_browser, storage_policy_unrestricted, table_schema_missing,
+        view_bypasses_rls,
     };
 
     const SECRET_KINDS: [SecretKind; 9] = [
@@ -541,6 +602,14 @@ mod tests {
         }
         for anyone in [true, false] {
             for checks_caller in [true, false] {
+                for yes_or_no in [true, false] {
+                    let facts = FunctionFacts {
+                        anyone,
+                        checks_caller,
+                        yes_or_no,
+                    };
+                    texts.push(function_bypasses_rls("get_orders", &facts));
+                }
                 for materialized in [true, false] {
                     for auth_users in [true, false] {
                         let facts = ViewFacts {

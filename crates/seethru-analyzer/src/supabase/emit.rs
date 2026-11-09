@@ -1,11 +1,11 @@
 use seethru_core::{
-    AccessRuleDetail, Basis, BucketVisibility, Confidence, DataStoreDetail, EdgeKind, Node, NodeId,
-    NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
+    AccessRuleDetail, Basis, BucketVisibility, Channel, Confidence, DataStoreDetail, EdgeKind,
+    Exposure, Node, NodeId, NodeKind, PolicyCommand, RlsStatus, RuleId, RuleScope, Severity, Zone,
 };
 
 use super::{
-    ANONYMOUS_ROLES, Condition, DEFAULT_SCHEMA, EXPOSED_SCHEMAS, MANAGED_SCHEMAS, Migrations,
-    Policy, SIGNED_IN_ROLES, TableKey, View,
+    ANONYMOUS_ROLES, Condition, DEFAULT_SCHEMA, EXPOSED_SCHEMAS, Function, MANAGED_SCHEMAS,
+    Migrations, Policy, SIGNED_IN_ROLES, TableKey, View,
 };
 use crate::classify::FileRole;
 use crate::graph::{Graph, Verdict, file_location, file_step, step};
@@ -70,6 +70,7 @@ impl Migrations {
 
         self.emit_buckets(graph);
         self.emit_views(graph);
+        self.emit_functions(graph);
         for ((key, name), policy) in &self.policies {
             if key.schema == "storage" && key.name == "objects" {
                 self.emit_storage_policy(graph, name, policy);
@@ -294,9 +295,94 @@ impl Migrations {
             }
         }
     }
+
+    fn emit_functions(&self, graph: &mut Graph) {
+        for (key, function) in &self.functions {
+            if !EXPOSED_SCHEMAS.contains(&key.schema.as_str()) || function.returns_trigger {
+                continue;
+            }
+            let label = table_label(key);
+            let exposure = if function.executors.anyone() {
+                Exposure::Public
+            } else if function.executors.signed_in() {
+                Exposure::Authenticated
+            } else {
+                Exposure::Internal
+            };
+            let entry_id = graph.add_node(Node {
+                id: NodeId::new(format!("entry:rpc:{}.{}", key.schema, key.name)),
+                label: label.clone(),
+                kind: NodeKind::EntryPoint {
+                    channel: Channel::Rpc,
+                    exposure,
+                },
+                zone: Zone::Database,
+                location: Some(function.defined_at.clone()),
+            });
+            let path = &function.defined_at.path;
+            let file_id = graph.add_file(path, FileRole::Migration, Basis::Path);
+            graph.add_edge(entry_id.clone(), file_id, EdgeKind::Invokes);
+            if !runs_as_admin(function) {
+                continue;
+            }
+            let principal_id = graph.add_node(Node {
+                id: NodeId::new(ADMIN_PRINCIPAL),
+                label: "postgres".to_owned(),
+                kind: NodeKind::Principal {},
+                zone: Zone::Database,
+                location: None,
+            });
+            graph.add_edge(entry_id.clone(), principal_id.clone(), EdgeKind::ActsAs);
+            if exposure == Exposure::Internal {
+                continue;
+            }
+            let facts = rules::FunctionFacts {
+                anyone: exposure == Exposure::Public,
+                checks_caller: self.function_checks_caller(key),
+                yes_or_no: function.returns_boolean,
+            };
+            let (severity, confidence) = if facts.checks_caller || facts.yes_or_no {
+                (Severity::Low, Confidence::Review)
+            } else if facts.anyone {
+                (Severity::High, Confidence::Likely)
+            } else {
+                (Severity::Medium, Confidence::Likely)
+            };
+            let evidence = vec![
+                step(
+                    &label,
+                    None,
+                    Some(entry_id.clone()),
+                    Some(function.defined_at.clone()),
+                ),
+                step(
+                    "postgres",
+                    Some(EdgeKind::ActsAs),
+                    Some(principal_id),
+                    function
+                        .security_at
+                        .clone()
+                        .or_else(|| Some(function.defined_at.clone())),
+                ),
+            ];
+            graph.add_finding(
+                Verdict {
+                    rule: RuleId::SupabaseFunctionBypassesRls,
+                    severity,
+                    confidence,
+                    from_build: false,
+                },
+                rules::function_bypasses_rls(&label, &facts),
+                entry_id,
+                Some(function.defined_at.clone()),
+                evidence,
+            );
+        }
+    }
 }
 
 const MAX_VIEW_READS: usize = 8;
+const ADMIN_PRINCIPAL: &str = "principal:supabase:postgres";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reach {
@@ -418,4 +504,8 @@ fn view_verdict(key: &TableKey, view: &View) -> Option<Verdict> {
         confidence,
         from_build: false,
     })
+}
+
+fn runs_as_admin(function: &Function) -> bool {
+    function.security_definer && function.owner_is_admin
 }
