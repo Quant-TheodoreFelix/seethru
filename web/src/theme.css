@@ -1,15 +1,15 @@
 :root {
   color-scheme: light;
-  --bg: #b6dfee;
+  --bg: #faf9f5;
   --surface: #ffffff;
   --ink: #141413;
-  --muted: #2b3d44;
+  --muted: #5e5d58;
   --rule: #141413;
   --shadow: #141413;
   --code-bg: rgb(20 20 19 / 0.08);
-  --grid: rgb(20 20 19 / 0.3);
-  --select-bg: #141413;
-  --select-ink: #b6dfee;
+  --grid: rgb(20 20 19 / 0.18);
+  --select-bg: #b6dfee;
+  --select-ink: #141413;
   --sev-ink: #141413;
   --critical: #ff6b4a;
   --high: #ff9f43;
