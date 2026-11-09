@@ -38,12 +38,15 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | `--build-output DIR` | `DIR`에 있는 Vite 또는 Next 빌드 결과물을 읽습니다. 프로젝트 안의 폴더여야 합니다 |
 
 
-| 탐지 항목            | 설명                                                                                 |
-|----------------------|--------------------------------------------------------------------------------------|
-| Supabase RLS         | 마이그레이션 SQL에서 RLS가 꺼진 테이블, 조건 없이 모든 행을 연 정책                  |
-| service_role 키 노출 | 브라우저 코드가 공개 환경변수로 service_role 키를 읽는 경우                          |
-| 비밀 값 노출         | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                   |
-| 스키마 없는 테이블   | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블 |
+| 탐지 항목            | 설명                                                                                         |
+|----------------------|----------------------------------------------------------------------------------------------|
+| Supabase RLS         | 마이그레이션 SQL에서 RLS가 꺼진 테이블, 조건 없이 모든 행을 연 정책                          |
+| Supabase 함수        | 누구나, 또는 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수 (RLS를 건너뜀) |
+| Supabase 뷰          | RLS를 건너뛰고 누구나, 또는 로그인한 사용자가 읽을 수 있는 뷰                                |
+| Supabase Storage     | 버킷의 모든 파일을 누구나, 또는 로그인한 모든 사용자에게 여는 Storage 정책                   |
+| service_role 키 노출 | 브라우저 코드가 공개 환경변수로 service_role 키를 읽는 경우                                  |
+| 비밀 값 노출         | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                           |
+| 스키마 없는 테이블   | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블         |
 
 ## 설정
 
@@ -78,15 +81,18 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `path` | 패턴에 맞는 파일에서 보고된 탐지. 패턴은 `exclude`와 같은 방식으로 씁니다  |
 
 
-| 규칙 ID                            | 심각도      | 탐지 내용                                                                |
-|------------------------------------|-------------|--------------------------------------------------------------------------|
-| `supabase-rls-disabled`            | 치명적      | `public` 스키마의 테이블에 RLS가 꺼져 있음                               |
-| `supabase-policy-unrestricted`     | 낮음~치명적 | 정책이 누구나, 또는 로그인한 모든 사용자에게 모든 행을 엶                |
-| `supabase-service-role-in-browser` | 치명적      | 브라우저 코드가 공개 환경변수로 service_role 키를 읽음                   |
-| `secret-in-browser-code`           | 치명적      | 브라우저로 전달되는 코드나 파일에 비밀 값이 있음                         |
-| `secret-in-public-env-var`         | 치명적      | `VITE_` 같은 공개 접두사가 붙은 환경변수에 비밀 값이 있음                |
-| `secret-in-source-code`            | 높음        | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음 |
-| `supabase-table-schema-missing`    | 정보        | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                        |
+| 규칙 ID                                | 심각도      | 탐지 내용                                                                                   |
+|----------------------------------------|-------------|---------------------------------------------------------------------------------------------|
+| `supabase-rls-disabled`                | 치명적      | `public` 스키마의 테이블에 RLS가 꺼져 있음                                                  |
+| `supabase-policy-unrestricted`         | 낮음~치명적 | 정책이 누구나, 또는 로그인한 모든 사용자에게 모든 행을 엶                                   |
+| `supabase-function-bypasses-rls`       | 낮음~높음   | anon이나 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수가 RLS 없이 실행됨 |
+| `supabase-view-bypasses-rls`           | 낮음~치명적 | `public` 스키마의 뷰가 RLS를 건너뛰고 anon이나 로그인한 사용자에게 읽힘                     |
+| `supabase-storage-policy-unrestricted` | 낮음~치명적 | `storage.objects` 정책이 누구나, 또는 로그인한 모든 사용자에게 버킷의 모든 파일을 엶        |
+| `supabase-service-role-in-browser`     | 치명적      | 브라우저 코드가 공개 환경변수로 service_role 키를 읽음                                      |
+| `secret-in-browser-code`               | 치명적      | 브라우저로 전달되는 코드나 파일에 비밀 값이 있음                                            |
+| `secret-in-public-env-var`             | 치명적      | `VITE_` 같은 공개 접두사가 붙은 환경변수에 비밀 값이 있음                                   |
+| `secret-in-source-code`                | 높음        | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음                    |
+| `supabase-table-schema-missing`        | 정보        | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                                           |
 
 - 문제 ID는 규칙 ID 뒤에 그래프 노드를 붙인 형태입니다. 예를 들어 `supabase-rls-disabled:table:public.orders`입니다.
 - 비밀 값 탐지의 문제 ID는 파일, 비밀 값 종류, 그 파일에서 같은 종류 중 몇 번째인지로 이루어집니다. 예를 들어 `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`입니다. 파일의 다른 코드가 바뀌어도 ID는 그대로입니다.

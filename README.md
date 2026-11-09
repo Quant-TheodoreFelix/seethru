@@ -37,12 +37,15 @@ The report is written to `<project path>/.seethru/report.html`, and that directo
 | `--build-output DIR` | Read the Vite or Next build output in DIR, a folder inside the project             |
 
 
-| Check                     | What it finds                                                                                |
-|---------------------------|----------------------------------------------------------------------------------------------|
-| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL                     |
-| service_role key exposure | Browser code that reads the service_role key from a public env variable                      |
-| Exposed secrets           | API keys and database URLs in code, build output and env files                               |
-| Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked |
+| Check                     | What it finds                                                                                           |
+|---------------------------|---------------------------------------------------------------------------------------------------------|
+| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL                                |
+| Supabase functions        | `security definer` functions that anyone or any signed-in user can call through `rpc()`, which skip RLS |
+| Supabase views            | Views that skip RLS and that anyone or any signed-in user can read                                      |
+| Supabase Storage          | Storage policies that open every file in a bucket to anyone or any signed-in user                       |
+| service_role key exposure | Browser code that reads the service_role key from a public env variable                                 |
+| Exposed secrets           | API keys and database URLs in code, build output and env files                                          |
+| Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked            |
 
 ## Configuration
 
@@ -76,15 +79,18 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `rule` | Every finding of a rule, by the rule ID in the table below              |
 | `path` | Findings reported in files that match a pattern, written like `exclude` |
 
-| Rule ID                            | Severity        | Finding                                                                                |
-|------------------------------------|-----------------|----------------------------------------------------------------------------------------|
-| `supabase-rls-disabled`            | Critical        | A table in the `public` schema has RLS off                                             |
-| `supabase-policy-unrestricted`     | Low to Critical | A policy lets anyone, or any signed-in user, reach every row                           |
-| `supabase-service-role-in-browser` | Critical        | Browser code reads the service_role key from a public env variable                     |
-| `secret-in-browser-code`           | Critical        | A secret in code or files that reach the browser                                       |
-| `secret-in-public-env-var`         | Critical        | A secret in an env variable with a public prefix such as `VITE_`                       |
-| `secret-in-source-code`            | High            | A secret in a file that does not reach the browser, such as server code or an env file |
-| `supabase-table-schema-missing`    | Info            | The code queries a table that no SQL file in the repo creates                          |
+| Rule ID                                | Severity        | Finding                                                                                              |
+|----------------------------------------|-----------------|------------------------------------------------------------------------------------------------------|
+| `supabase-rls-disabled`                | Critical        | A table in the `public` schema has RLS off                                                           |
+| `supabase-policy-unrestricted`         | Low to Critical | A policy lets anyone, or any signed-in user, reach every row                                         |
+| `supabase-function-bypasses-rls`       | Low to High     | A `security definer` function that anon or signed-in users can call through `rpc()` runs without RLS |
+| `supabase-view-bypasses-rls`           | Low to Critical | A view in the `public` schema skips RLS and can be read by anon or signed-in users                   |
+| `supabase-storage-policy-unrestricted` | Low to Critical | A `storage.objects` policy lets anyone, or any signed-in user, reach every file in a bucket          |
+| `supabase-service-role-in-browser`     | Critical        | Browser code reads the service_role key from a public env variable                                   |
+| `secret-in-browser-code`               | Critical        | A secret in code or files that reach the browser                                                     |
+| `secret-in-public-env-var`             | Critical        | A secret in an env variable with a public prefix such as `VITE_`                                     |
+| `secret-in-source-code`                | High            | A secret in a file that does not reach the browser, such as server code or an env file               |
+| `supabase-table-schema-missing`        | Info            | The code queries a table that no SQL file in the repo creates                                        |
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
