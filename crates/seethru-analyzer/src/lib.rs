@@ -266,7 +266,11 @@ impl SecretRecord {
 
     fn emit(self, graph: &mut Graph, role: FileRole) {
         let rel_path = self.rel_path.as_str();
+        let mut ordinals: BTreeMap<seethru_core::SecretKind, u32> = BTreeMap::new();
         for hit in self.hits {
+            let ordinal = ordinals.entry(hit.kind).or_insert(0);
+            *ordinal = ordinal.saturating_add(1);
+            let secret_id = format!("secret:{rel_path}:{}:{ordinal}", hit.kind.as_str());
             let (rule, severity, explanation) = match (&hit.public_var, self.real_env_file) {
                 (Some(var), true) => (
                     RuleId::SecretInPublicEnvVar,
@@ -284,10 +288,9 @@ impl SecretRecord {
                     rules::secret_in_source(hit.kind, rel_path),
                 ),
             };
-            let Location { line, column, .. } = hit.location;
             let file_id = graph.add_file(rel_path, role);
             let secret_id = graph.add_node(Node {
-                id: NodeId::new(format!("secret:{rel_path}:{line}:{column}")),
+                id: NodeId::new(secret_id),
                 label: hit.masked.as_str().to_owned(),
                 kind: NodeKind::Secret {
                     secret_kind: hit.kind,

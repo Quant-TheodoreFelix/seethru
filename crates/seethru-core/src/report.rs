@@ -205,6 +205,22 @@ pub enum SecretKind {
     PrivateKey,
 }
 
+impl SecretKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SupabaseServiceRoleKey => "supabaseServiceRoleKey",
+            Self::SupabaseSecretKey => "supabaseSecretKey",
+            Self::DatabaseUrl => "databaseUrl",
+            Self::StripeSecretKey => "stripeSecretKey",
+            Self::OpenAiApiKey => "openAiApiKey",
+            Self::AnthropicApiKey => "anthropicApiKey",
+            Self::AwsAccessKeyId => "awsAccessKeyId",
+            Self::GithubToken => "githubToken",
+            Self::PrivateKey => "privateKey",
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]

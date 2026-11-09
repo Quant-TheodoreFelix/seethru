@@ -117,6 +117,11 @@ fn secrets_are_reported_by_where_they_live_and_never_leak_into_the_report() {
         &format!("const db = \"{db_url}\";\n"),
     );
     project.write("dist/assets/index-abc.js", &format!("var a=\"{openai}\";"));
+    let second_stripe = ["sk", "_live_", &body(33)].concat();
+    project.write(
+        "server/pay.ts",
+        &format!("const a = \"{stripe}\";\nconst b = \"{second_stripe}\";\n"),
+    );
     project.write("node_modules/pkg/index.js", &format!("var a=\"{openai}\";"));
 
     let report = project.scan();
@@ -146,6 +151,16 @@ fn secrets_are_reported_by_where_they_live_and_never_leak_into_the_report() {
         (
             RuleId::SecretInSourceCode,
             Severity::High,
+            "server/pay.ts".to_owned(),
+        ),
+        (
+            RuleId::SecretInSourceCode,
+            Severity::High,
+            "server/pay.ts".to_owned(),
+        ),
+        (
+            RuleId::SecretInSourceCode,
+            Severity::High,
             "supabase/functions/report/index.ts".to_owned(),
         ),
     ];
@@ -154,12 +169,26 @@ fn secrets_are_reported_by_where_they_live_and_never_leak_into_the_report() {
 
     assert!(report.edges.iter().any(|edge| edge.from.as_str()
         == "env:VITE_SUPABASE_SERVICE_ROLE_KEY"
-        && edge.to.as_str().starts_with("secret:.env.local:")));
+        && edge.to.as_str() == "secret:.env.local:supabaseServiceRoleKey:1"));
+    let ids: Vec<&str> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.id.contains(":secret:server/pay.ts:"))
+        .map(|finding| finding.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "secret-in-source-code:secret:server/pay.ts:stripeSecretKey:1",
+            "secret-in-source-code:secret:server/pay.ts:stripeSecretKey:2",
+        ]
+    );
 
     let json = serde_json::to_string(&report).unwrap_or_default();
     for raw in [
         jwt.as_str(),
         stripe.as_str(),
+        second_stripe.as_str(),
         openai.as_str(),
         db_password.as_str(),
     ] {

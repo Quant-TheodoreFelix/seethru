@@ -86,7 +86,7 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `supabase-table-schema-missing`    | Info            | The code queries a table that no SQL file in the repo creates                          |
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
-- The ID of a secret finding contains its line and column, so it changes when the code above it moves. Accept secrets with `rule` and `path` instead.
+- The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
 - Accepted findings stay in the report and the CLI summary under their own heading, with the reason. They do not count toward the totals or color the graph.
 - If `seethru.toml` cannot be used, the scan stops and names the line instead of ignoring it. That covers unknown keys, a missing reason, an unknown rule ID and invalid patterns. The file must be a regular file of up to 64 KB, with at most 256 `exclude` patterns and 1,000 `[[accept]]` entries.
 - `--no-config` ignores the file. Use it when you review a project someone else wrote, so its config cannot hide anything from you.
