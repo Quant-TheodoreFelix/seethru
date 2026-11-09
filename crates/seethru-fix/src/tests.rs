@@ -246,3 +246,43 @@ fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
         assert!(prompt.ends_with(closing), "{prompt}");
     }
 }
+
+#[test]
+fn database_prompts_name_the_function_view_and_bucket() {
+    let Some(mut report) = fixture_report() else {
+        unreachable!("fixture scan failed")
+    };
+    attach_fix_prompts(&mut report);
+    let function = prompt_for(&report, RuleId::SupabaseFunctionBypassesRls);
+    for text in [&function.en, &function.ko] {
+        assert!(
+            text.contains(
+                "revoke execute on function public.delete_any_post from public, anon, authenticated;"
+            ),
+            "{text}"
+        );
+    }
+    let view = prompt_for(&report, RuleId::SupabaseViewBypassesRls);
+    for text in [&view.en, &view.ko] {
+        assert!(
+            text.contains("alter view public.post_feed set (security_invoker = true);"),
+            "{text}"
+        );
+    }
+    let storage: Vec<LocalizedText> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule == RuleId::SupabaseStoragePolicyUnrestricted)
+        .filter_map(|finding| finding.fix_prompt.clone())
+        .collect();
+    assert_eq!(storage.len(), 2);
+    for prompt in &storage {
+        for text in [&prompt.en, &prompt.ko] {
+            assert!(
+                text.contains("`avatars`") || text.contains("`invoices`"),
+                "{text}"
+            );
+            assert!(text.contains("storage.objects"), "{text}");
+        }
+    }
+}

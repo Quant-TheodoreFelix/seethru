@@ -39,6 +39,21 @@ fn supabase_vite_fixture_reports_expected_findings() {
                 "policy:public.posts/Signed in users can edit posts"
             ),
             (
+                RuleId::SupabaseFunctionBypassesRls,
+                Severity::High,
+                "entry:rpc:public.delete_any_post"
+            ),
+            (
+                RuleId::SupabaseViewBypassesRls,
+                Severity::High,
+                "table:public.post_feed"
+            ),
+            (
+                RuleId::SupabaseStoragePolicyUnrestricted,
+                Severity::High,
+                "policy:storage.objects/Anyone can upload invoices"
+            ),
+            (
                 RuleId::SupabasePolicyUnrestricted,
                 Severity::Medium,
                 "policy:public.profiles/Profiles are public"
@@ -47,6 +62,16 @@ fn supabase_vite_fixture_reports_expected_findings() {
                 RuleId::SupabasePolicyUnrestricted,
                 Severity::Medium,
                 "policy:public.posts/Anyone can read posts"
+            ),
+            (
+                RuleId::SupabaseStoragePolicyUnrestricted,
+                Severity::Medium,
+                "policy:storage.objects/Avatar images are public"
+            ),
+            (
+                RuleId::SupabaseFunctionBypassesRls,
+                Severity::Low,
+                "entry:rpc:public.is_note_owner"
             ),
         ]
     );
@@ -58,6 +83,16 @@ fn supabase_vite_fixture_reports_expected_findings() {
             .iter()
             .any(|edge| edge.from.as_str() == from && edge.to.as_str() == to && edge.kind == kind)
     };
+    assert!(edge(
+        "entry:rpc:public.list_profiles",
+        "principal:supabase:postgres",
+        EdgeKind::ActsAs
+    ));
+    assert!(edge(
+        "store:storageBucket:invoices",
+        "policy:storage.objects/Users manage their own invoices",
+        EdgeKind::GuardedBy
+    ));
     assert!(edge(
         "file:src/pages/Todos.tsx",
         "table:public.todos",
@@ -100,7 +135,10 @@ fn supabase_vite_fixture_reports_expected_findings() {
             .all(|finding| !finding.evidence.is_empty())
     );
     assert!(report.findings.iter().all(|finding| {
-        finding.evidence.last().and_then(|step| step.node.as_ref()) == Some(&finding.node)
+        finding
+            .evidence
+            .iter()
+            .any(|step| step.node.as_ref() == Some(&finding.node))
     }));
 }
 
