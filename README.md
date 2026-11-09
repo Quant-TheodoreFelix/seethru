@@ -26,13 +26,70 @@ pnpm install && pnpm build
 cargo run -p seethru-cli -- scan <project path>
 ```
 
-The report is written to `<project path>/.seethru/report.html`, and that directory is ignored by git automatically. The report opens as a single file without any outside requests, and every secret it finds is masked so the raw value never appears. Add `--json` to print the result as JSON.
+The report is written to `<project path>/.seethru/report.html`, and that directory is ignored by git automatically. The report opens as a single file without any outside requests, and every secret it finds is masked so the raw value never appears.
 
-| Check                     | What it finds                                                            |
-|---------------------------|--------------------------------------------------------------------------|
-| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL |
-| service_role key exposure | Browser code that reads the service_role key from a public env variable  |
-| Exposed secrets           | API keys and database URLs in code, build output and env files           |
+| Option        | What it does                                                                       |
+|---------------|------------------------------------------------------------------------------------|
+| `--out FILE`  | Write the HTML report to `FILE` instead                                            |
+| `--json`      | Print the scan report as JSON instead of writing HTML                              |
+| `--lang ko`   | Show the summary and the report in Korean (default is `en`)                        |
+| `--no-config` | Ignore `seethru.toml` in the scanned project (see [Configuration](#configuration)) |
+
+
+| Check                     | What it finds                                                                                |
+|---------------------------|----------------------------------------------------------------------------------------------|
+| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL                     |
+| service_role key exposure | Browser code that reads the service_role key from a public env variable                      |
+| Exposed secrets           | API keys and database URLs in code, build output and env files                               |
+| Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked |
+
+## Configuration
+
+To skip paths or accept findings you meant to have, put a `seethru.toml` in the root of the project you scan. The file is optional.
+
+```toml
+exclude = ["legacy", "**/*.test.ts", "supabase/seed.sql"]
+
+[[accept]]
+rule = "supabase-policy-unrestricted"
+path = "supabase/migrations/*_products.sql"
+reason = "Products are public on purpose"
+
+[[accept]]
+id = "supabase-table-schema-missing:table:public.orders"
+reason = "orders was made in the dashboard and has RLS on there"
+```
+
+**`exclude`** lists files and folders that seethru does not read at all.
+
+- Patterns support `*`, `?` and `**`. A pattern without `/` matches a name at any depth, so `legacy` skips every `legacy` folder. A pattern with `/` is matched from the project root, so begin it with `**/` to match at any depth.
+- Patterns must stay inside the project. `..`, a leading `/` and `\` are rejected.
+- `.git`, `node_modules`, `.pnpm-store`, `.yarn` and `.seethru` are always skipped, so there is no need to list them.
+- Problems in excluded files never show up. To keep a known problem in sight, use `[[accept]]` instead.
+
+**`[[accept]]`** marks matching findings as accepted. Each entry needs a `reason` of 1 to 500 characters and at least one of the keys below. When an entry has more than one, all of them must match.
+
+| Key    | Matches                                                                 |
+|--------|-------------------------------------------------------------------------|
+| `id`   | One finding, by the ID shown in the report's fix panel and in `--json`  |
+| `rule` | Every finding of a rule, by the rule ID in the table below              |
+| `path` | Findings reported in files that match a pattern, written like `exclude` |
+
+| Rule ID                            | Severity        | Finding                                                                                |
+|------------------------------------|-----------------|----------------------------------------------------------------------------------------|
+| `supabase-rls-disabled`            | Critical        | A table in the `public` schema has RLS off                                             |
+| `supabase-policy-unrestricted`     | Low to Critical | A policy lets anyone, or any signed-in user, reach every row                           |
+| `supabase-service-role-in-browser` | Critical        | Browser code reads the service_role key from a public env variable                     |
+| `secret-in-browser-code`           | Critical        | A secret in code or files that reach the browser                                       |
+| `secret-in-public-env-var`         | Critical        | A secret in an env variable with a public prefix such as `VITE_`                       |
+| `secret-in-source-code`            | High            | A secret in a file that does not reach the browser, such as server code or an env file |
+| `supabase-table-schema-missing`    | Info            | The code queries a table that no SQL file in the repo creates                          |
+
+- A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
+- The ID of a secret finding contains its line and column, so it changes when the code above it moves. Accept secrets with `rule` and `path` instead.
+- Accepted findings stay in the report and the CLI summary under their own heading, with the reason. They do not count toward the totals or color the graph.
+- If `seethru.toml` cannot be used, the scan stops and names the line instead of ignoring it. That covers unknown keys, a missing reason, an unknown rule ID and invalid patterns. The file must be a regular file of up to 64 KB, with at most 256 `exclude` patterns and 1,000 `[[accept]]` entries.
+- `--no-config` ignores the file. Use it when you review a project someone else wrote, so its config cannot hide anything from you.
 
 ## Safety by design
 
