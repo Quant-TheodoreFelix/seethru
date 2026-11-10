@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use seethru_core::{
-    AccessRuleDetail, CredentialDetail, DataStoreDetail, EdgeKind, Exposure, Finding, Lang,
-    LocalizedText, Location, Node, NodeKind, PolicyCommand, RuleId, ScanReport, SecretKind,
+    AccessRuleDetail, Channel, CredentialDetail, DataStoreDetail, EdgeKind, Exposure, Finding,
+    Lang, LocalizedText, Location, Node, NodeKind, PolicyCommand, RuleId, ScanReport, SecretKind,
 };
 
 const MAX_NAME_CHARS: usize = 120;
@@ -105,6 +105,25 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
                 .map(clean)
                 .unwrap_or_else(|| clean(label));
             function_bypasses_rls(&function, *exposure == Exposure::Public, &place, lang)
+        }
+        (RuleId::SupabaseServiceRoleUnguarded, Some(NodeKind::EntryPoint { channel, .. })) => {
+            let entry = finding
+                .evidence
+                .first()
+                .map_or_else(|| clean(label), |step| clean(&step.label));
+            let client = finding
+                .evidence
+                .iter()
+                .find(|step| step.via == Some(EdgeKind::ActsAs))
+                .and_then(|step| step.location.as_ref())
+                .map(|location| format!("`{}:{}`", clean(&location.path), location.line));
+            service_role_unguarded(
+                &entry,
+                *channel == Channel::ServerAction,
+                client.as_deref(),
+                &place,
+                lang,
+            )
         }
         (
             RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
@@ -308,6 +327,51 @@ fn function_bypasses_rls(function: &str, anyone: bool, place: &str, lang: Lang) 
                  1. 이 함수를 어디서 쓰는지 찾아 줘. 트리거, 정책, 다른 DB 함수에서만 쓴다면 새 마이그레이션 파일을 만들어서 `revoke execute on function {function} from public, anon, authenticated;`를 추가해 줘. `anon`에서만 거두면 `public`에 권한이 남아 있어서 소용없어.\n\
                  2. 앱이 `rpc()`로 부른다면 `security invoker`로 바꿔 RLS가 적용되게 하거나, 함수가 데이터를 읽고 고치기 전에 `auth.uid()`로 부른 사람을 확인하게 해 줘. 이때 `set search_path = ''`도 추가해 줘.\n\
                  3. 이미 적용된 마이그레이션 파일은 고치지 마."
+            )
+        }
+    }
+}
+
+fn service_role_unguarded(
+    entry: &str,
+    action: bool,
+    client: Option<&str>,
+    place: &str,
+    lang: Lang,
+) -> String {
+    match lang {
+        Lang::En => {
+            let action = if action {
+                " It is a server action, so anyone can call it with a POST request even when no page shows it."
+            } else {
+                ""
+            };
+            let client = client
+                .map(|at| format!(" The service_role client is created at {at}."))
+                .unwrap_or_default();
+            format!(
+                "`{entry}` runs code that uses a Supabase client made with the service_role key, which skips RLS, and nothing checks who is calling first.{action}{place}{client}\n\
+                 1. At the start of the handler, get the signed-in user from a Supabase client made with the user's session, for example `createServerClient` from `@supabase/ssr` and `supabase.auth.getUser()`, and return a 401 response when there is no user. If the project uses another auth library, use its check instead.\n\
+                 2. Make each query that uses the service_role client touch only that user's rows, for example with `.eq(\"user_id\", user.id)`, or move those queries to the user's client so RLS applies.\n\
+                 3. If this endpoint must stay open, like a webhook or a scheduled job, verify the request's signature or a shared secret from a server env variable before any database call.\n\
+                 4. Keep the service_role key in server code only."
+            )
+        }
+        Lang::Ko => {
+            let action = if action {
+                " server action이라서 보여 주는 페이지가 없어도 누구나 POST 요청으로 부를 수 있어."
+            } else {
+                ""
+            };
+            let client = client
+                .map(|at| format!(" service_role 클라이언트는 {at}에서 만들어."))
+                .unwrap_or_default();
+            format!(
+                "`{entry}`가 RLS를 건너뛰는 service_role 키로 만든 Supabase 클라이언트를 쓰는데, 그 전에 누가 부르는지 확인하지 않아.{action}{place}{client}\n\
+                 1. 처리 함수 맨 앞에서 사용자 세션으로 만든 Supabase 클라이언트(예: `@supabase/ssr`의 `createServerClient`)로 `supabase.auth.getUser()`를 불러 로그인한 사용자를 확인하고, 없으면 401 응답을 돌려줘. 다른 인증 라이브러리를 쓴다면 그 라이브러리의 확인 방법을 써 줘.\n\
+                 2. service_role 클라이언트로 하는 쿼리는 `.eq(\"user_id\", user.id)`처럼 그 사용자의 행만 건드리게 하거나, 사용자 클라이언트로 옮겨서 RLS가 적용되게 해 줘.\n\
+                 3. 웹훅이나 예약 작업처럼 열어 둬야 하는 곳이라면 데이터베이스를 건드리기 전에 요청 서명이나 서버 환경변수에 둔 공유 비밀 값을 확인해 줘.\n\
+                 4. service_role 키는 서버 코드에서만 써 줘."
             )
         }
     }

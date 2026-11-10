@@ -286,3 +286,31 @@ fn database_prompts_name_the_function_view_and_bucket() {
         }
     }
 }
+
+#[test]
+fn unguarded_service_role_prompt_names_the_entry_and_the_client() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/supabase-next");
+    let Ok(mut report) = seethru_analyzer::scan(&root) else {
+        unreachable!("fixture scan failed")
+    };
+    attach_fix_prompts(&mut report);
+    let prompts: Vec<(String, LocalizedText)> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule == RuleId::SupabaseServiceRoleUnguarded)
+        .filter_map(|finding| Some((finding.node.to_string(), finding.fix_prompt.clone()?)))
+        .collect();
+    assert_eq!(prompts.len(), 2);
+    for (node, prompt) in &prompts {
+        for text in [&prompt.en, &prompt.ko] {
+            assert!(text.contains("supabase.auth.getUser()"), "{text}");
+            if node.ends_with("/api/todos") {
+                assert!(text.contains("`DELETE /api/todos`"), "{text}");
+                assert!(text.contains("`src/lib/admin-server.ts:4`"), "{text}");
+            } else {
+                assert!(text.contains("`addTodo()`"), "{text}");
+                assert!(text.contains("POST"), "{text}");
+            }
+        }
+    }
+}
