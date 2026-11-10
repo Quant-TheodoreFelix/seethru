@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -87,6 +87,30 @@ pub enum Input {
         functions: u32,
         machine_code: bool,
     },
+    Binary {
+        path: String,
+        format: BinaryFormat,
+        tools: Vec<ToolUse>,
+        lines: u32,
+    },
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum BinaryFormat {
+    Elf,
+    MachO,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolUse {
+    pub name: String,
+    pub version: String,
 }
 
 #[derive(
@@ -108,6 +132,7 @@ pub enum InputKind {
     Sarif,
     CompileDatabase,
     CompiledOutput,
+    Binary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -138,6 +163,12 @@ pub enum LimitationCode {
     CompiledOutputPartlyRead,
     CompiledOutputWithoutWipes,
     OutsideEntriesNotFound,
+    BinaryToolNotPermitted,
+    BinaryToolFailed,
+    BinaryNotFound,
+    BinaryWithoutLineInfo,
+    BinaryWipesNotConfirmed,
+    BinaryChecksPartial,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -593,6 +624,7 @@ pub enum RuleId {
     SecretDependentDivision,
     CargoDependencyNotPinned,
     StopOnOutsideInput,
+    MemoryWipeRemoved,
 }
 
 impl RuleId {
@@ -618,6 +650,7 @@ impl RuleId {
             Self::SecretDependentDivision => "secret-dependent-division",
             Self::CargoDependencyNotPinned => "cargo-dependency-not-pinned",
             Self::StopOnOutsideInput => "stop-on-outside-input",
+            Self::MemoryWipeRemoved => "memory-wipe-removed",
         }
     }
 
@@ -638,6 +671,7 @@ impl RuleId {
             Self::SecretDependentDivision => &[208],
             Self::CargoDependencyNotPinned => &[829],
             Self::StopOnOutsideInput => &[248],
+            Self::MemoryWipeRemoved => &[14],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing | Self::External => &[],
         }
@@ -686,6 +720,8 @@ pub struct Origin {
     pub inputs: Vec<InputKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
 }
 
 impl Origin {
@@ -694,6 +730,7 @@ impl Origin {
             engine: "seethru".to_owned(),
             inputs: vec![InputKind::Source],
             rule: None,
+            tools: Vec::new(),
         }
     }
 
@@ -702,6 +739,16 @@ impl Origin {
             engine: "seethru".to_owned(),
             inputs: vec![InputKind::Source, InputKind::CompiledOutput],
             rule: None,
+            tools: Vec::new(),
+        }
+    }
+
+    pub fn seethru_with_binary(tools: Vec<String>) -> Self {
+        Self {
+            engine: "seethru".to_owned(),
+            inputs: vec![InputKind::Source, InputKind::Binary],
+            rule: None,
+            tools,
         }
     }
 
@@ -710,6 +757,7 @@ impl Origin {
             engine: "seethru".to_owned(),
             inputs: vec![InputKind::Source, InputKind::BuildOutput],
             rule: None,
+            tools: Vec::new(),
         }
     }
 }

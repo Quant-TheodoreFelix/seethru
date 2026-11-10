@@ -335,6 +335,7 @@ fn outside_scanner_prompt_keeps_scanner_text_out() {
             engine: "semgrep".to_owned(),
             inputs: vec![seethru_core::InputKind::Sarif],
             rule: Some("evil.rule".to_owned()),
+            tools: Vec::new(),
         },
         cwe: vec![78],
         proof: None,

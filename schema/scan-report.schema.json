@@ -62,6 +62,13 @@
       ],
       "type": "string"
     },
+    "BinaryFormat": {
+      "enum": [
+        "elf",
+        "machO"
+      ],
+      "type": "string"
+    },
     "BucketVisibility": {
       "enum": [
         "public",
@@ -545,6 +552,40 @@
             "machineCode"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "$ref": "#/$defs/BinaryFormat"
+            },
+            "lines": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "tools": {
+              "items": {
+                "$ref": "#/$defs/ToolUse"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "binary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "format",
+            "tools",
+            "lines"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -554,7 +595,8 @@
         "buildOutput",
         "sarif",
         "compileDatabase",
-        "compiledOutput"
+        "compiledOutput",
+        "binary"
       ],
       "type": "string"
     },
@@ -591,7 +633,13 @@
         "compiledOutputNotOptimized",
         "compiledOutputPartlyRead",
         "compiledOutputWithoutWipes",
-        "outsideEntriesNotFound"
+        "outsideEntriesNotFound",
+        "binaryToolNotPermitted",
+        "binaryToolFailed",
+        "binaryNotFound",
+        "binaryWithoutLineInfo",
+        "binaryWipesNotConfirmed",
+        "binaryChecksPartial"
       ],
       "type": "string"
     },
@@ -866,6 +914,12 @@
             "string",
             "null"
           ]
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -913,7 +967,8 @@
         "secret-in-native-code",
         "secret-dependent-division",
         "cargo-dependency-not-pinned",
-        "stop-on-outside-input"
+        "stop-on-outside-input",
+        "memory-wipe-removed"
       ],
       "type": "string"
     },
@@ -1077,6 +1132,22 @@
       "type": "object"
     },
     "ToolInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ToolUse": {
       "additionalProperties": false,
       "properties": {
         "name": {

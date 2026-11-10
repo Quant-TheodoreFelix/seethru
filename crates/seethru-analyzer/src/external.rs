@@ -799,6 +799,7 @@ pub(crate) fn emit(
                 engine: item.engine.clone(),
                 inputs: vec![InputKind::Sarif],
                 rule: Some(item.rule.clone()),
+                tools: Vec::new(),
             },
             cwe: item.cwe.clone(),
             proof: None,

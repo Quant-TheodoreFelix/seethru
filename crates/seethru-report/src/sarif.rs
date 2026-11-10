@@ -262,6 +262,10 @@ fn rule_text(rule: RuleId, lang: Lang) -> &'static str {
             "Compiled code keeps a check that panics, and the value it tests comes from an exported entry point, so a caller may be able to stop the program.",
             "컴파일된 코드에 panic하는 검사가 남아 있고 그 값이 외부 진입점에서 들어와서, 호출자가 프로그램을 멈출 수 있어요.",
         ),
+        RuleId::MemoryWipeRemoved => (
+            "Code that clears a secret from memory is written in the source, but the program that was built has no code for it.",
+            "비밀을 메모리에서 지우는 코드가 소스에는 있는데, 빌드된 프로그램에는 그 코드가 없어요.",
+        ),
         RuleId::CargoDependencyNotPinned => (
             "A Cargo dependency is not fixed to one version and the project has no Cargo.lock.",
             "Cargo 의존성이 한 버전으로 고정돼 있지 않고 프로젝트에 Cargo.lock이 없어요.",

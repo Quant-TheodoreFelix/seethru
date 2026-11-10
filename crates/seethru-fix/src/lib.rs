@@ -155,6 +155,7 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
         }
         (RuleId::SecretDependentDivision, _) => secret_division(&place, lang),
         (RuleId::StopOnOutsideInput, _) => stop_on_outside_input(&place, lang),
+        (RuleId::MemoryWipeRemoved, _) => memory_wipe_removed(&place, lang),
         (RuleId::CargoDependencyNotPinned, _) => dependency_not_pinned(&clean(label), &place, lang),
         _ => format!("{}{place}", clean(finding.title.get(lang))),
     };
@@ -477,6 +478,27 @@ fn stop_on_outside_input(place: &str, lang: Lang) -> String {
              3. 그 검사들이 이미 panic을 불가능하게 만든다면 아무것도 바꾸지 마. 어느 검사가 어디서 막는지 알려 줘. 내가 사유로 기록할게.\n\
              4. 호출자가 실패하게 만들 수 있다면, 이 줄 전에 잘못된 값을 처리하고 호출자에게 오류를 돌려줘. `get`, `checked_add`처럼 panic 대신 결과를 돌려주는 호출을 써 줘.\n\
              5. 그게 올바른 동작이 아니라면 wrapping 연산이나 값 자르기로 문제를 가리지 마. 검사가 사라졌는지는 컴파일된 코드에서만 보이니까, 다시 빌드하고 검사를 다시 돌리라고 알려 줘."
+        ),
+    }
+}
+
+fn memory_wipe_removed(place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!(
+            "This code clears memory that held a secret, but the program that was built has no code for that line. The compiler removes a write to memory that nothing reads afterwards.{place}\n\
+             1. Read the code at that line and confirm that it is meant to clear a secret such as a key or a password. If it only prepares a buffer for reuse, change nothing and tell me, so I can record the reason.\n\
+             2. If it clears a secret, replace it with a wipe the compiler must keep. If the project already uses the `zeroize` crate, call `zeroize()` on the value or wrap it in `Zeroizing`. Do not add a new dependency without asking me first.\n\
+             3. Without that crate, write each byte with `core::ptr::write_volatile` and add `core::sync::atomic::compiler_fence(Ordering::SeqCst)` after the loop. Keep the `unsafe` block as small as possible and write why it is safe.\n\
+             4. Do not use `black_box` or a plain loop for this. Neither is guaranteed to stay.\n\
+             5. Look for the same pattern near this code, for example in `Drop` and on error paths, and fix those the same way. Then tell me to build again and rerun the scan, because only the built program shows whether the wipe stayed."
+        ),
+        Lang::Ko => format!(
+            "이 코드는 비밀이 들어 있던 메모리를 지우는데, 빌드된 프로그램에는 그 줄의 코드가 없어. 컴파일러는 뒤에서 아무도 읽지 않는 메모리 쓰기를 지워.{place}\n\
+             1. 그 줄의 코드를 읽고 키나 비밀번호 같은 비밀을 지우려는 것이 맞는지 확인해 줘. 버퍼를 다시 쓰려고 비우는 것뿐이라면 아무것도 바꾸지 말고 알려 줘. 내가 사유로 기록할게.\n\
+             2. 비밀을 지우는 것이라면 컴파일러가 반드시 남기는 방식으로 바꿔 줘. 프로젝트가 이미 `zeroize` 크레이트를 쓰고 있으면 값에 `zeroize()`를 부르거나 `Zeroizing`으로 감싸 줘. 새 의존성은 나한테 먼저 물어보고 추가해.\n\
+             3. 그 크레이트가 없으면 `core::ptr::write_volatile`로 바이트마다 쓰고, 반복문 뒤에 `core::sync::atomic::compiler_fence(Ordering::SeqCst)`를 넣어 줘. `unsafe` 블록은 최대한 작게 하고 왜 안전한지 적어 줘.\n\
+             4. `black_box`나 평범한 반복문은 쓰지 마. 둘 다 남는다는 보장이 없어.\n\
+             5. 이 코드 근처에 같은 패턴이 있는지(예: `Drop`, 오류 경로) 찾아서 같은 방식으로 고쳐 줘. 그런 다음 다시 빌드하고 검사를 다시 돌리라고 알려 줘. 소거가 남았는지는 빌드된 프로그램에서만 보여."
         ),
     }
 }

@@ -975,6 +975,40 @@ pub(crate) fn stop_on_outside_input(file: &str, line: u32) -> Text {
     }
 }
 
+pub(crate) fn memory_wipe_removed(file: &str, line: u32, programs: &[String], sure: bool) -> Text {
+    let file = display_name(file);
+    let programs = programs
+        .iter()
+        .map(|program| format!("`{}`", display_name(program)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (sure_en, sure_ko) = if sure {
+        (
+            "Other wipes in the same program were found by the same method, so this one was most likely removed.",
+            "같은 프로그램의 다른 소거는 같은 방법으로 찾았으니, 이 소거는 지워졌을 가능성이 높아요.",
+        )
+    } else {
+        (
+            "Line information in an optimized program is not exact, and a wipe that the compiler cannot remove was also not found by this method. Read the code or the disassembly to confirm.",
+            "최적화된 프로그램의 줄 정보는 정확하지 않고, 컴파일러가 지울 수 없는 소거도 이 방법으로 찾지 못한 것이 있어요. 코드나 디스어셈블리를 읽어 확인하세요.",
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("The memory wipe at line {line} of `{file}` is not in the built program"),
+            ko: format!("`{file}` {line}번째 줄의 메모리 소거가 빌드된 프로그램에 없어요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "This line fills memory with zeros and nothing in the function uses that memory afterwards, which is how code clears a secret such as a key. The built program ({programs}) has code for the rest of this function and none for this line. A compiler may remove a write that nothing reads later, so the secret can stay in memory after the function returns, where a crash dump or another bug can expose it. {sure_en} If this line only resets a buffer that holds no secret, accept this finding in `seethru.toml` with a reason."
+            ),
+            ko: format!(
+                "이 줄은 메모리를 0으로 채우고, 함수 안에서 그 뒤로 이 메모리를 쓰는 곳이 없어요. 키 같은 비밀을 지울 때 쓰는 방식이에요. 빌드된 프로그램({programs})에는 이 함수의 다른 줄에 해당하는 코드는 있는데 이 줄의 코드는 없어요. 컴파일러는 뒤에서 아무도 읽지 않는 쓰기를 지울 수 있어서, 함수가 끝난 뒤에도 비밀이 메모리에 남고 크래시 덤프나 다른 버그로 드러날 수 있어요. {sure_ko} 비밀이 없는 버퍼를 비우는 줄이라면 `seethru.toml`에 사유를 적고 이 탐지를 받아들이세요."
+            ),
+        },
+    }
+}
+
 pub(crate) fn secret_dependent_division(file: &str, line: u32, confirmed: bool) -> Text {
     let file = display_name(file);
     let (seen_en, seen_ko) = if confirmed {
@@ -1073,8 +1107,8 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "Rust 프로젝트인데 소스와 Cargo 파일만 읽었어요. 비밀 값이 실행 시간에 영향을 주는지는 컴파일 결과에서만 확인할 수 있어요. `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release`로 빌드한 뒤 결과 폴더를 `--llvm-ir`로 넘기세요. 믿을 수 있는 코드라면 `--build`를 붙여 seethru가 빌드하게 할 수도 있어요.",
         ),
         LimitationCode::CompiledChecksPartial => (
-            "In compiled output, seethru only checks whether a secret value reaches a division. Branches and table lookups that depend on a secret, and whether memory wipes survive the compiler, are not checked yet. A value counts as secret only when the code wipes the memory it is kept in with a call written in the code, such as `zeroize()`. Memory that a type wipes by itself when it is dropped does not count. Output of a library is from before the final link, so the shipped program can differ.",
-            "컴파일 결과에서는 비밀 값이 나눗셈에 닿는지만 확인해요. 비밀에 따라 갈리는 분기와 표 조회, 메모리 소거가 컴파일 뒤에도 남는지는 아직 확인하지 않아요. 코드에 적힌 호출(예: `zeroize()`)로 쓰고 나서 지우는 메모리에 든 값만 비밀로 봐요. 타입이 drop될 때 알아서 지우는 메모리는 세지 않아요. 라이브러리의 결과는 최종 링크 전 단계라 실제 배포되는 프로그램과 다를 수 있어요.",
+            "In compiled output, seethru only checks whether a secret value reaches a division. Branches and table lookups that depend on a secret are not checked yet. Whether memory wipes survive is checked only in a linked program, when you allow it with `--tool`. A value counts as secret only when the code wipes the memory it is kept in with a call written in the code, such as `zeroize()`. Memory that a type wipes by itself when it is dropped does not count. Output of a library is from before the final link, so the shipped program can differ.",
+            "컴파일 결과에서는 비밀 값이 나눗셈에 닿는지만 확인해요. 비밀에 따라 갈리는 분기와 표 조회는 아직 확인하지 않아요. 메모리 소거가 남는지는 링크된 프로그램에서만, `--tool`로 허락했을 때 확인해요. 코드에 적힌 호출(예: `zeroize()`)로 쓰고 나서 지우는 메모리에 든 값만 비밀로 봐요. 타입이 drop될 때 알아서 지우는 메모리는 세지 않아요. 라이브러리의 결과는 최종 링크 전 단계라 실제 배포되는 프로그램과 다를 수 있어요.",
         ),
         LimitationCode::CompiledOutputWithoutMachineCode => (
             "Some compiled files had no machine code listing (`.s`) next to them, so findings there could not be confirmed and need review.",
@@ -1091,6 +1125,30 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::OutsideEntriesNotFound => (
             "The compiled output has no exported entry point that takes arguments, so values from outside were not followed and checks that can stop the program were not looked for. That check works for kernels, firmware and libraries called from other languages.",
             "컴파일 결과에 인자를 받는 외부 진입점이 없어서, 밖에서 온 값을 따라가지 못했고 프로그램을 멈출 수 있는 검사도 찾지 않았어요. 이 검사는 커널, 펌웨어, 다른 언어에서 부르는 라이브러리에서 동작해요.",
+        ),
+        LimitationCode::BinaryToolNotPermitted => (
+            "A built program was there to look at, but seethru was not allowed to run the tools that read it, so whether memory wipes survive in the program you ship was not checked. Add `--tool objdump --tool dwarfdump` to allow it. Both are needed.",
+            "확인할 수 있는 빌드된 프로그램이 있었지만 그것을 읽는 도구를 실행해도 된다는 허락이 없어서, 배포하는 프로그램에 메모리 소거가 남는지는 확인하지 않았어요. 허락하려면 `--tool objdump --tool dwarfdump`를 붙이세요. 둘 다 필요해요.",
+        ),
+        LimitationCode::BinaryToolFailed => (
+            "An outside tool that reads the built program could not be used. It was not found, did not finish in time, printed too much, or printed something seethru does not understand. That program was not checked. seethru works with the LLVM versions of `objdump` and `dwarfdump`. If they are installed somewhere else, give the full path with `--tool NAME=PATH`.",
+            "빌드된 프로그램을 읽는 외부 도구를 쓰지 못했어요. 도구를 찾지 못했거나, 제시간에 끝나지 않았거나, 출력이 너무 많았거나, seethru가 이해하지 못하는 내용을 출력했어요. 그 프로그램은 확인하지 않았어요. seethru는 LLVM의 `objdump`와 `dwarfdump`로 동작해요. 다른 곳에 설치돼 있으면 `--tool 이름=경로`로 전체 경로를 알려 주세요.",
+        ),
+        LimitationCode::BinaryNotFound => (
+            "The build made no linked program (an executable or a dynamic library), which is normal for a library. Whether memory wipes survive can only be checked in a linked program, because the compiler removes them while building the program that uses the library. Pass such a program with `--binary`.",
+            "빌드 결과에 링크된 프로그램(실행 파일이나 동적 라이브러리)이 없어요. 라이브러리 프로젝트에서는 이렇게 나와요. 메모리 소거가 남는지는 링크된 프로그램에서만 확인할 수 있어요. 컴파일러는 라이브러리를 쓰는 프로그램을 빌드할 때 소거를 지우기 때문이에요. 그런 프로그램을 `--binary`로 넘기세요.",
+        ),
+        LimitationCode::BinaryWithoutLineInfo => (
+            "A built program has no line information for the files of this project, so its code could not be matched to the source and it was not checked. This happens when the program is stripped, was built in another folder or on another computer, or, on macOS, when its `.dSYM` folder is not next to it. A program built with `--build` keeps line information.",
+            "빌드된 프로그램에 이 프로젝트 파일의 줄 정보가 없어서 코드를 소스와 맞춰 볼 수 없었고, 확인하지 않았어요. 프로그램에서 디버그 정보를 떼어 냈거나(strip), 다른 폴더나 다른 컴퓨터에서 빌드했거나, macOS에서 `.dSYM` 폴더가 옆에 없을 때 이렇게 돼요. `--build`로 빌드한 프로그램에는 줄 정보가 남아요.",
+        ),
+        LimitationCode::BinaryWipesNotConfirmed => (
+            "Some memory wipes written in the source were not found in a built program, but no other wipe was found there either. seethru cannot tell whether they were removed or whether its method does not work on that program, so they are not reported. Check them by hand.",
+            "소스에 적힌 메모리 소거 중 일부를 빌드된 프로그램에서 찾지 못했는데, 다른 소거도 하나도 찾지 못했어요. 지워진 것인지 이 방법이 그 프로그램에서 통하지 않는 것인지 seethru가 구분할 수 없어서 알리지 않았어요. 직접 확인하세요.",
+        ),
+        LimitationCode::BinaryChecksPartial => (
+            "In a built program, seethru only checks wipes it recognizes in Rust source: `fill(0)`, `write_bytes` and `memset` with zero, and assigning an array of zeros, when nothing in the function uses the memory afterwards. It matches them to the program by line information, which is not exact in optimized code. Wipes a type does when it is dropped, wipes inside macros and wipes in other languages are not checked. A wipe that is still there does not prove every copy of the secret is cleared.",
+            "빌드된 프로그램에서는 Rust 소스에서 알아볼 수 있는 소거만 확인해요. `fill(0)`, 0으로 채우는 `write_bytes`와 `memset`, 0으로 된 배열 대입이고, 함수 안에서 그 뒤로 그 메모리를 쓰지 않을 때예요. 프로그램과는 줄 정보로 맞춰 보는데, 최적화된 코드의 줄 정보는 정확하지 않아요. 타입이 drop될 때 하는 소거, 매크로 안의 소거, 다른 언어의 소거는 확인하지 않아요. 소거가 남아 있어도 비밀의 모든 사본이 지워졌다는 뜻은 아니에요.",
         ),
         LimitationCode::CompiledOutputPartlyRead => (
             "Part of the compiled output was left out because it was too large, could not be read, or points at files outside this project.",

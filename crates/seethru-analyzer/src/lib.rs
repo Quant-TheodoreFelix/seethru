@@ -1,3 +1,4 @@
+mod binary;
 mod build_output;
 mod cargo;
 mod classify;
@@ -37,6 +38,7 @@ use resolve::{ConfigText, Resolver};
 use roles::{Assigned, Module};
 use supabase::Migrations;
 
+pub use binary::{BinaryCode, BinaryInput, CodeReader};
 pub use config::CONFIG_FILE;
 
 const MAX_RESOLVER_CONFIG_BYTES: usize = 256 * 1024;
@@ -79,6 +81,8 @@ pub struct ScanOptions {
     pub sarif: Vec<PathBuf>,
     pub compile_commands: Option<PathBuf>,
     pub llvm_ir: Vec<PathBuf>,
+    pub binaries: Vec<BinaryInput>,
+    pub binary_problems: Vec<LimitationCode>,
 }
 
 impl Default for ScanOptions {
@@ -89,6 +93,8 @@ impl Default for ScanOptions {
             sarif: Vec::new(),
             compile_commands: None,
             llvm_ir: Vec::new(),
+            binaries: Vec::new(),
+            binary_problems: Vec::new(),
         }
     }
 }
@@ -156,6 +162,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut native_sources = Vec::new();
     let mut option_files = Vec::new();
     let mut manifests = Vec::new();
+    let mut rust_sources = Vec::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
     let mut uses_supabase = false;
@@ -222,6 +229,15 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
                     .to_owned(),
                 facts: native::collect(&entry.rel_path, &text),
             });
+        }
+        if !options.binaries.is_empty() && entry.rel_path.ends_with(".rs") {
+            let wipes = binary::find_wipes(&text);
+            if !wipes.is_empty() {
+                rust_sources.push(binary::Source {
+                    path: entry.rel_path.clone(),
+                    wipes,
+                });
+            }
         }
         if cargo::is_manifest(&entry.rel_path) {
             manifests.push(cargo::Manifest {
@@ -295,6 +311,14 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         });
         Some(compiled)
     };
+    let checked = binary::emit(
+        &root,
+        &options.binaries,
+        &options.binary_problems,
+        &rust_sources,
+        &mut graph,
+        &|rel_path| workspace.package_of(rel_path),
+    );
     if let Some(build) = &build {
         for route in &build.routes {
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
@@ -449,6 +473,8 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             }
         }
     }
+    inputs.extend(checked.inputs);
+    limitations.extend(checked.limitations.into_iter().map(rules::limitation));
     if let Some(compiled) = &build_list {
         inputs.push(Input::CompileDatabase {
             path: compiled.rel.clone(),
