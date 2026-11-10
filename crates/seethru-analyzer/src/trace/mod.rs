@@ -2,6 +2,7 @@ mod catalog;
 mod collect;
 mod model;
 
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use seethru_core::{
@@ -17,16 +18,19 @@ use crate::roles::Assigned;
 use crate::rules::{self, EntryKind, Reached};
 use crate::script::{Directive, is_service_role_env};
 
-use catalog::{HTTP_METHODS, auth_like, is_project_specifier};
+use catalog::{HTTP_METHODS, auth_like};
+use collect::OVERFLOW;
 pub(crate) use collect::collect;
 pub(crate) use model::FileFlow;
-use model::{Candidate, ExportTarget, Imported, Matcher, Op, Strength, Target, Value};
+use model::{Candidate, ExportTarget, Imported, Matcher, Op, Strength, Target, Value, Via};
 
 const MAX_DEPTH: usize = 24;
 const MAX_REEXPORTS: usize = 8;
 const MAX_ROUNDS: usize = 20;
 const MAX_HOPS: usize = 12;
 const MAX_CALLERS: usize = 200;
+const MAX_STEPS: usize = 4_096;
+const MAX_RETURNS: usize = 64;
 const SERVICE_ROLE: &str = "principal:supabase:service_role";
 
 pub(crate) struct Module {
@@ -103,6 +107,9 @@ struct Project<'p> {
     guards_any: BTreeSet<FnRef>,
     callees: BTreeMap<FnRef, Vec<Option<FnRef>>>,
     gates: BTreeMap<FnRef, Vec<(Gate, Option<GuardRef>)>>,
+    call_gates: BTreeMap<FnRef, Vec<(Gate, Option<GuardRef>)>>,
+    steps: Cell<usize>,
+    returns: RefCell<BTreeMap<FnRef, Option<Resolved>>>,
 }
 
 impl<'p> Project<'p> {
@@ -121,10 +128,14 @@ impl<'p> Project<'p> {
             guards_any: BTreeSet::new(),
             callees: BTreeMap::new(),
             gates: BTreeMap::new(),
+            call_gates: BTreeMap::new(),
+            steps: Cell::new(0),
+            returns: RefCell::new(BTreeMap::new()),
         };
         project.link_calls();
         project.summarize();
         project.compute_gates();
+        project.compute_call_gates();
         project
     }
 
@@ -148,7 +159,11 @@ impl<'p> Project<'p> {
     }
 
     fn resolve(&self, file: usize, value: &Value, depth: usize) -> Resolved {
-        if depth > MAX_DEPTH {
+        if depth == 0 {
+            self.steps.set(0);
+        }
+        self.steps.set(self.steps.get() + 1);
+        if depth > MAX_DEPTH || self.steps.get() > MAX_STEPS {
             return Resolved::Unknown;
         }
         let Some(module) = self.modules.get(file) else {
@@ -218,11 +233,17 @@ impl<'p> Project<'p> {
         depth: usize,
         reexports: usize,
     ) -> Resolved {
+        if depth == 0 {
+            self.steps.set(0);
+        }
         let Some(module) = self.modules.get(file) else {
             return Resolved::Unknown;
         };
         let Some(target) = self.resolver.resolve(&module.rel_path, specifier) else {
-            if is_project_specifier(specifier) {
+            if self
+                .resolver
+                .points_into_project(&module.rel_path, specifier)
+            {
                 return Resolved::Broken;
             }
             let name = match imported {
@@ -246,6 +267,9 @@ impl<'p> Project<'p> {
         depth: usize,
         reexports: usize,
     ) -> Resolved {
+        if depth == 0 {
+            self.steps.set(0);
+        }
         if reexports > MAX_REEXPORTS || depth > MAX_DEPTH {
             return Resolved::Unknown;
         }
@@ -275,20 +299,33 @@ impl<'p> Project<'p> {
     }
 
     fn returned(&self, function: FnRef, depth: usize) -> Resolved {
+        if let Some(known) = self.returns.borrow().get(&function) {
+            return known.clone().unwrap_or(Resolved::Unknown);
+        }
         let Some(body) = self.function(function) else {
             return Resolved::Unknown;
         };
+        self.returns.borrow_mut().insert(function, None);
         let mut service = None;
-        for value in &body.returns {
+        let mut other = false;
+        for value in body.returns.iter().take(MAX_RETURNS) {
             match self.resolve(function.0, value, depth + 1) {
                 Resolved::ServiceClient(location) => {
                     service.get_or_insert(location);
                 }
-                Resolved::OtherClient => return Resolved::OtherClient,
+                Resolved::OtherClient => other = true,
                 _ => {}
             }
         }
-        service.map_or(Resolved::Unknown, Resolved::ServiceClient)
+        let found = match (other, service) {
+            (true, _) => Resolved::OtherClient,
+            (false, Some(location)) => Resolved::ServiceClient(location),
+            (false, None) => Resolved::Unknown,
+        };
+        self.returns
+            .borrow_mut()
+            .insert(function, Some(found.clone()));
+        found
     }
 
     fn link_calls(&mut self) {
@@ -478,7 +515,12 @@ impl<'p> Project<'p> {
         };
         let mut best = (Gate::Open, None);
         for id in cover {
-            let Some((gate, guard)) = gates.get(*id as usize) else {
+            let found = if *id == OVERFLOW {
+                Some(&(Gate::Unknown, None))
+            } else {
+                gates.get(*id as usize)
+            };
+            let Some((gate, guard)) = found else {
                 continue;
             };
             if *gate > best.0 {
@@ -486,6 +528,63 @@ impl<'p> Project<'p> {
             }
         }
         best
+    }
+
+    fn via_gate(&self, at: FnRef, via: &Via) -> (Gate, Option<GuardRef>) {
+        let resolved = via
+            .callee
+            .as_ref()
+            .map(|callee| self.resolve(at.0, callee, 0));
+        match resolved {
+            Some(Resolved::Function(target)) => {
+                if self.guards_any.contains(&target) || self.throwing.contains_key(&target) {
+                    let strength = self
+                        .checks
+                        .get(&target)
+                        .or_else(|| self.throwing.get(&target))
+                        .copied()
+                        .unwrap_or(Strength::Verified);
+                    (Gate::Guarded, self.guard_ref_of(target, strength))
+                } else if self.checks.contains_key(&target) {
+                    (Gate::Unknown, None)
+                } else {
+                    (Gate::Open, None)
+                }
+            }
+            Some(Resolved::Broken) => (Gate::Unknown, None),
+            _ if auth_like(&via.name) => (Gate::Unknown, None),
+            _ => (Gate::Open, None),
+        }
+    }
+
+    fn compute_call_gates(&mut self) {
+        let mut gates = BTreeMap::new();
+        for (at, function) in self.functions() {
+            let list = function
+                .calls
+                .iter()
+                .map(|call| {
+                    let site = self.site_gate(at, &call.cover);
+                    match &call.via {
+                        Some(via) => {
+                            let wrapped = self.via_gate(at, via);
+                            if wrapped.0 > site.0 { wrapped } else { site }
+                        }
+                        None => site,
+                    }
+                })
+                .collect();
+            gates.insert(at, list);
+        }
+        self.call_gates = gates;
+    }
+
+    fn call_gate(&self, at: FnRef, position: usize) -> (Gate, Option<GuardRef>) {
+        self.call_gates
+            .get(&at)
+            .and_then(|gates| gates.get(position))
+            .cloned()
+            .unwrap_or((Gate::Unknown, None))
     }
 
     fn risks(&self) -> Vec<Risk> {
@@ -802,13 +901,7 @@ fn search(
             }
         }
         for (caller, position) in list.iter().take(MAX_CALLERS) {
-            let Some(call) = project
-                .function(*caller)
-                .and_then(|body| body.calls.get(*position))
-            else {
-                continue;
-            };
-            let next = (*caller, project.site_gate(*caller, &call.cover).0.max(gate));
+            let next = (*caller, project.call_gate(*caller, *position).0.max(gate));
             if let std::collections::btree_map::Entry::Vacant(slot) = states.entry(next) {
                 slot.insert(Some((function, gate, *position)));
                 queue.push_back((next, depth + 1));
@@ -837,8 +930,7 @@ fn first_guard(
     risk: &Risk,
 ) -> Option<GuardRef> {
     for (caller, position, _) in path {
-        let call = project.function(*caller)?.calls.get(*position)?;
-        if let (Gate::Guarded, guard) = project.site_gate(*caller, &call.cover) {
+        if let (Gate::Guarded, guard) = project.call_gate(*caller, *position) {
             return guard;
         }
     }

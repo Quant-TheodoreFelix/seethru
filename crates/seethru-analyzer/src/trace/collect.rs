@@ -19,13 +19,14 @@ use super::catalog::{
 };
 use super::model::{
     Access, CallSite, Candidate, ExportTarget, FileFlow, FlowFunction, Imported, Matcher, Op,
-    Strength, Target, Value,
+    Strength, Target, Value, Via,
 };
 use crate::Lines;
 
 const MAX_FUNCTIONS: usize = 2_000;
 const MAX_CALLS: usize = 20_000;
 const MAX_COVER: usize = 32;
+pub(crate) const OVERFLOW: u32 = u32::MAX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Form {
@@ -54,6 +55,7 @@ struct Check {
 struct Buffered {
     check: Option<Check>,
     callee: Option<Value>,
+    access: bool,
     name: String,
     location: Location,
 }
@@ -219,6 +221,7 @@ fn mentions_denied_status(statement: &Statement<'_>) -> bool {
 
 enum Atom<'e, 'a> {
     Ref(SymbolId),
+    ErrRef(SymbolId),
     Call(&'e CallExpression<'a>),
     Secret,
 }
@@ -287,8 +290,24 @@ impl<'s> Collector<'s> {
         let mut cover: Vec<u32> = context.frames.iter().flatten().copied().collect();
         cover.sort_unstable();
         cover.dedup();
-        cover.truncate(MAX_COVER);
-        cover
+        if cover.len() <= MAX_COVER {
+            return cover;
+        }
+        let candidates = self
+            .flow
+            .functions
+            .get(context.index)
+            .map(|function| function.candidates.as_slice())
+            .unwrap_or_default();
+        let (mut kept, others): (Vec<u32>, Vec<u32>) = cover
+            .into_iter()
+            .partition(|id| matches!(candidates.get(*id as usize), Some(Candidate::Guard { .. })));
+        kept.truncate(MAX_COVER - 1);
+        let room = (MAX_COVER - 1).saturating_sub(kept.len());
+        kept.extend(others.iter().rev().take(room));
+        kept.sort_unstable();
+        kept.push(OVERFLOW);
+        kept
     }
 
     fn is_top(&self) -> bool {
@@ -305,6 +324,24 @@ impl<'s> Collector<'s> {
     }
 
     fn activate(&mut self, candidate: Candidate) {
+        if let Candidate::CallGuard {
+            callee,
+            tested,
+            top,
+            ..
+        } = &candidate
+            && let Some(context) = self.stack.last()
+            && let Some(function) = self.flow.functions.get(context.index)
+            && context.frames.iter().flatten().any(|id| {
+                matches!(
+                    function.candidates.get(*id as usize),
+                    Some(Candidate::CallGuard { callee: seen, tested: was_tested, top: was_top, .. })
+                        if seen == callee && was_tested == tested && was_top == top
+                )
+            })
+        {
+            return;
+        }
         if let Some(id) = self.add_candidate(candidate)
             && let Some(frame) = self.context().and_then(|context| context.frames.last_mut())
         {
@@ -483,26 +520,51 @@ impl<'s> Collector<'s> {
     fn callee_value(&self, call: &CallExpression<'_>) -> Option<Value> {
         match strip(&call.callee) {
             Expression::Identifier(_) => Some(self.value_of(&call.callee)),
-            Expression::StaticMemberExpression(_) => match self.value_of(&call.callee) {
+            Expression::StaticMemberExpression(member) => match self.value_of(&call.callee) {
                 Value::Member(symbol, name) => Some(Value::Member(symbol, name)),
-                _ => None,
+                _ => {
+                    let mut root = &member.object;
+                    while let Some((object, _)) = member_property(root) {
+                        root = object;
+                    }
+                    match strip(root) {
+                        Expression::Identifier(id)
+                            if self
+                                .symbol_of(id)
+                                .is_some_and(|symbol| self.flow.imports.contains_key(&symbol)) =>
+                        {
+                            Some(Value::Global(self.callee_name(call)))
+                        }
+                        _ => None,
+                    }
+                }
             },
             _ => None,
         }
     }
 
-    fn callee_name(call: &CallExpression<'_>) -> String {
+    fn callee_name(&self, call: &CallExpression<'_>) -> String {
         match strip(&call.callee) {
             Expression::Identifier(id) => id.name.as_str().to_owned(),
-            _ => member_property(&call.callee)
-                .map(|(_, property)| property.to_owned())
-                .unwrap_or_default(),
+            _ => match member_property(&call.callee) {
+                Some((object, property)) => match strip(object) {
+                    Expression::Identifier(id)
+                        if self
+                            .symbol_of(id)
+                            .is_some_and(|symbol| self.flow.imports.contains_key(&symbol)) =>
+                    {
+                        format!("{}.{property}", id.name.as_str())
+                    }
+                    _ => property.to_owned(),
+                },
+                None => String::new(),
+            },
         }
     }
 
-    fn record_access(&mut self, call: &CallExpression<'_>) {
+    fn record_access(&mut self, call: &CallExpression<'_>) -> bool {
         let Some((object, method)) = member_property(&call.callee) else {
-            return;
+            return false;
         };
         let found = if let Some((_, write)) = TABLE_OPS.iter().find(|(name, _)| *name == method)
             && let Some(from) = call_of(object)
@@ -559,7 +621,9 @@ impl<'s> Collector<'s> {
                     cover,
                 });
             }
+            return true;
         }
+        false
     }
 
     fn after_statement(&mut self, statement: &Statement<'_>, buffered: Vec<Buffered>) {
@@ -596,6 +660,9 @@ impl<'s> Collector<'s> {
     fn statement_calls(&mut self, buffered: Vec<Buffered>) {
         let top = self.is_top();
         for call in buffered {
+            if call.access {
+                continue;
+            }
             match call.check {
                 Some(Check {
                     form: Form::Throws,
@@ -638,7 +705,7 @@ impl<'s> Collector<'s> {
                 return None;
             }
             self.callee_value(call)
-                .map(|callee| (callee, Self::callee_name(call)))
+                .map(|callee| (callee, self.callee_name(call)))
         });
         let Some(context) = self.context() else {
             return;
@@ -790,7 +857,7 @@ impl<'s> Collector<'s> {
             },
             Expression::Identifier(id) if id.name.as_str().to_ascii_lowercase().contains("err") => {
                 if let Some(symbol) = self.symbol_of(id) {
-                    atoms.push(Atom::Ref(symbol));
+                    atoms.push(Atom::ErrRef(symbol));
                 }
             }
             Expression::StaticMemberExpression(member)
@@ -801,7 +868,9 @@ impl<'s> Collector<'s> {
                     .to_ascii_lowercase()
                     .contains("err") =>
             {
-                self.ref_atoms(&member.object, atoms);
+                let mut found = Vec::new();
+                self.each_ref(&member.object, &mut |symbol| found.push(symbol));
+                atoms.extend(found.into_iter().map(Atom::ErrRef));
             }
             _ => {}
         }
@@ -813,13 +882,13 @@ impl<'s> Collector<'s> {
         };
         atoms.iter().any(|atom| match atom {
             Atom::Secret => true,
-            Atom::Ref(symbol) => {
+            Atom::Ref(symbol) | Atom::ErrRef(symbol) => {
                 context.pending.contains_key(symbol) || context.results.contains_key(symbol)
             }
             Atom::Call(call) => {
                 self.check_of(call).is_some()
                     || self.callee_value(call).is_some()
-                    || auth_like(&Self::callee_name(call))
+                    || auth_like(&self.callee_name(call))
             }
         })
     }
@@ -875,6 +944,16 @@ impl<'s> Collector<'s> {
                     name: "secret".to_owned(),
                     location: self.location(at),
                 }),
+                Atom::ErrRef(symbol) => {
+                    if let Some((callee, name)) = context.results.get(symbol) {
+                        out.push(Candidate::CallGuard {
+                            callee: callee.clone(),
+                            name: name.clone(),
+                            tested: true,
+                            top: top && exits_caller,
+                        });
+                    }
+                }
                 Atom::Ref(symbol) => {
                     if let Some((strength, name)) = context.pending.get(symbol) {
                         out.push(Candidate::Guard {
@@ -905,11 +984,11 @@ impl<'s> Collector<'s> {
                     } else if let Some(callee) = self.callee_value(call) {
                         out.push(Candidate::CallGuard {
                             callee,
-                            name: Self::callee_name(call),
+                            name: self.callee_name(call),
                             tested: true,
                             top: top && exits_caller,
                         });
-                    } else if auth_like(&Self::callee_name(call)) {
+                    } else if auth_like(&self.callee_name(call)) {
                         out.push(Candidate::Unknown);
                     }
                 }
@@ -984,9 +1063,14 @@ impl<'s> Collector<'s> {
                 let index = self.flow.functions.len();
                 let location = self.location(call.span.start);
                 let cover = self.cover();
+                let via = (!serve).then(|| Via {
+                    callee: self.callee_value(call),
+                    name: self.callee_name(call),
+                });
                 if let Some(function) = self.current() {
                     function.calls.push(CallSite {
                         callee: Value::Function(index),
+                        via,
                         location,
                         cover,
                     });
@@ -1430,7 +1514,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             let location = self.location(it.span.start);
             self.flow.clients.push((key, location));
         }
-        self.record_access(it);
+        let access = self.record_access(it);
         let check = self.check_of(it);
         let callee = if check.is_some() || self.is_supabase_constructor(it) {
             None
@@ -1443,12 +1527,13 @@ impl<'a> Visit<'a> for Collector<'_> {
             if let Some(function) = self.current() {
                 function.calls.push(CallSite {
                     callee: value.clone(),
+                    via: None,
                     location: location.clone(),
                     cover,
                 });
             }
         }
-        let name = Self::callee_name(it);
+        let name = self.callee_name(it);
         if let Some(buffer) = self
             .context()
             .and_then(|context| context.buffers.last_mut())
@@ -1456,6 +1541,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             buffer.push(Buffered {
                 check,
                 callee,
+                access,
                 name,
                 location,
             });

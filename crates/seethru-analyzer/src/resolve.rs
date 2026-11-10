@@ -105,6 +105,31 @@ impl<'a> Resolver<'a> {
         self.through_packages(specifier)
     }
 
+    pub(crate) fn points_into_project(&self, from: &str, specifier: &str) -> bool {
+        if specifier.starts_with('.') || specifier.starts_with('/') {
+            return true;
+        }
+        if ALIAS_SHORTHANDS
+            .iter()
+            .any(|prefix| specifier.starts_with(prefix))
+        {
+            return true;
+        }
+        if self.packages.iter().any(|package| {
+            specifier == package.name || specifier.starts_with(&format!("{}/", package.name))
+        }) {
+            return true;
+        }
+        ancestors(from)
+            .find_map(|dir| self.aliases.get(dir))
+            .is_some_and(|aliases| {
+                aliases
+                    .paths
+                    .iter()
+                    .any(|(pattern, _)| pattern_match(pattern, specifier).is_some())
+            })
+    }
+
     fn through_aliases(&self, from: &str, specifier: &str) -> Option<String> {
         let aliases = ancestors(from).find_map(|dir| self.aliases.get(dir))?;
         let mut rules: Vec<(&String, &Vec<String>, usize)> = aliases

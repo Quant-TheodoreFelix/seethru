@@ -61,8 +61,15 @@ pub(crate) struct Access {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct Via {
+    pub callee: Option<Value>,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct CallSite {
     pub callee: Value,
+    pub via: Option<Via>,
     pub location: Location,
     pub cover: Vec<u32>,
 }

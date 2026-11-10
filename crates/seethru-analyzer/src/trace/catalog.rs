@@ -86,10 +86,6 @@ pub(crate) fn is_jsonwebtoken(specifier: &str) -> bool {
     specifier == "jsonwebtoken" || specifier.starts_with("npm:jsonwebtoken")
 }
 
-pub(crate) fn is_project_specifier(specifier: &str) -> bool {
-    specifier.starts_with('.') || specifier.starts_with('/')
-}
-
 #[cfg(test)]
 mod tests {
     use super::{auth_like, is_secret_name};

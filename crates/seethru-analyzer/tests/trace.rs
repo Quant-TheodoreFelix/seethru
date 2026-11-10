@@ -430,3 +430,113 @@ export async function middleware() {\n\
         Some(Exposure::Public)
     );
 }
+
+#[test]
+fn wrappers_unknown_imports_and_error_only_tests_never_read_as_open() {
+    let project = TempProject::new("trace-gaps");
+    base(&project);
+    project.write(
+        "src/lib/wrap.ts",
+        "import { createClient } from \"@/lib/server\";\n\
+export async function withUser(req: Request, run: (user: unknown) => Promise<Response>) {\n\
+  const supabase = await createClient();\n\
+  const { data: { user } } = await supabase.auth.getUser();\n\
+  if (!user) return new Response(\"no\", { status: 401 });\n\
+  return run(user);\n\
+}\n",
+    );
+    project.write(
+        "src/lib/policy.ts",
+        "export const policy = { allows: async (req: Request) => req.headers.has(\"x\") };\n",
+    );
+    let routes: &[(&str, &str, &str)] = &[
+        (
+            "wrapped",
+            "import { withUser } from \"@/lib/wrap\";\n",
+            "  return withUser(req, async () => {\n    await admin.from(\"orders\").delete().eq(\"id\", 1);\n    return new Response(\"ok\");\n  });",
+        ),
+        (
+            "wrappedpkg",
+            "import { withAuth } from \"some-auth-kit\";\n",
+            "  return withAuth(req, async () => {\n    await admin.from(\"orders\").delete().eq(\"id\", 1);\n  });",
+        ),
+        (
+            "missing",
+            "import { gate } from \"@/lib/missing\";\n",
+            "  await gate();\n  await admin.from(\"orders\").delete().eq(\"id\", 1);",
+        ),
+        (
+            "object",
+            "import { policy } from \"@/lib/policy\";\n",
+            "  if (!(await policy.allows(req))) return new Response(\"no\");\n  await admin.from(\"orders\").delete().eq(\"id\", 1);",
+        ),
+        (
+            "error",
+            "",
+            "  const supabase = await createClient();\n  const { error } = await supabase.auth.getSession();\n  if (error) return new Response(\"no\");\n  await admin.from(\"orders\").delete().eq(\"id\", 1);",
+        ),
+    ];
+    for (name, imports, body) in routes {
+        project.write(
+            &format!("src/app/api/{name}/route.ts"),
+            &format!("{imports}{}", route(body)),
+        );
+    }
+    let helpers: String = (0..40)
+        .map(|index| format!("async function note{index}() {{}}\n"))
+        .collect();
+    let noise: String = (0..40)
+        .map(|index| format!("  await note{index}();\n"))
+        .collect();
+    project.write(
+        "src/app/api/crowded/route.ts",
+        &format!(
+            "{HEAD}{helpers}export async function POST() {{\n{noise}  await requireUser();\n  await admin.from(\"orders\").delete().eq(\"id\", 1);\n}}\n"
+        ),
+    );
+    project.write(
+        "src/app/api/crowdedopen/route.ts",
+        &format!(
+            "{HEAD}{helpers}export async function POST() {{\n{noise}  await admin.from(\"orders\").delete().eq(\"id\", 1);\n}}\n"
+        ),
+    );
+    let Some(report) = scan(&project) else { return };
+    let expect = [
+        ("wrapped", Exposure::Authenticated),
+        ("wrappedpkg", Exposure::Unknown),
+        ("missing", Exposure::Unknown),
+        ("object", Exposure::Unknown),
+        ("error", Exposure::Unknown),
+        ("crowded", Exposure::Authenticated),
+        ("crowdedopen", Exposure::Unknown),
+    ];
+    for (name, wanted) in expect {
+        let id = format!("entry:httpRoute:/api/{name}");
+        assert_eq!(exposure(&report, &id), Some(wanted), "{id}");
+    }
+    assert!(unguarded(&report).is_empty());
+}
+
+#[test]
+fn deep_chains_of_returns_finish_quickly() {
+    let project = TempProject::new("trace-hostile");
+    base(&project);
+    let count = 300;
+    let mut source = String::from("import { admin } from \"@/lib/admin\";\n");
+    for index in 0..count {
+        let next = (index + 1) % count;
+        let other = (index + 7) % count;
+        source.push_str(&format!(
+            "export function f{index}(n: number) {{\n  if (n === 1) return f{next}(n);\n  if (n === 2) return f{other}(n);\n  if (n === 3) return f{next}(n + 1);\n  if (n === 4) return f{other}(n + 1);\n  return admin;\n}}\n"
+        ));
+    }
+    project.write("src/lib/chain.ts", &source);
+    project.write(
+        "src/app/api/chain/route.ts",
+        "import { f0 } from \"@/lib/chain\";\nexport async function POST() {\n  const client = f0(1);\n  await client.from(\"orders\").delete().eq(\"id\", 1);\n}\n",
+    );
+    let started = std::time::Instant::now();
+    let Some(report) = scan(&project) else { return };
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+    assert!(exposure(&report, "entry:httpRoute:/api/chain").is_some());
+}
