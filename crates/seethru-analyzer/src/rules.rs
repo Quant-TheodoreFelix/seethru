@@ -975,6 +975,76 @@ pub(crate) fn stop_on_outside_input(file: &str, line: u32) -> Text {
     }
 }
 
+pub(crate) fn security_header_missing(header: seethru_probe::Header) -> Text {
+    use seethru_probe::Header;
+    let (title_en, title_ko, why_en, why_ko) = match header {
+        Header::ContentSecurityPolicy => (
+            "The running app does not send a content security policy",
+            "실행 중인 앱이 콘텐츠 보안 정책을 보내지 않아요",
+            "A content security policy (the `Content-Security-Policy` header) tells the browser which scripts the page may run. Without it, if an attacker manages to put a script into the page, the browser runs it with the visitor's login. The policy does not fix such a bug, but it limits the damage.",
+            "콘텐츠 보안 정책(`Content-Security-Policy` 헤더)은 이 페이지에서 어떤 스크립트를 실행해도 되는지 브라우저에 알려 줘요. 이것이 없으면 공격자가 페이지에 스크립트를 끼워 넣었을 때 브라우저가 방문자의 로그인 상태로 그대로 실행해요. 정책이 그런 버그를 고쳐 주지는 않지만 피해를 줄여 줘요.",
+        ),
+        Header::ContentTypeOptions => (
+            "The running app lets the browser guess file types",
+            "실행 중인 앱이 브라우저가 파일 종류를 추측하게 둬요",
+            "Without the header `X-Content-Type-Options: nosniff`, a browser may decide by itself that a file is a script and run it, for example a file a user uploaded.",
+            "`X-Content-Type-Options: nosniff` 헤더가 없으면 브라우저가 파일을 스스로 스크립트라고 판단해 실행할 수 있어요. 사용자가 올린 파일이 그런 예예요.",
+        ),
+        Header::FrameProtection => (
+            "Other sites can show the running app inside a frame",
+            "다른 사이트가 실행 중인 앱을 프레임 안에 띄울 수 있어요",
+            "The page sends neither `X-Frame-Options` nor a `frame-ancestors` rule in its content security policy. Another site can load the page invisibly on top of its own buttons and trick a logged-in visitor into clicking something in your app. This is called clickjacking.",
+            "페이지가 `X-Frame-Options`도, 콘텐츠 보안 정책의 `frame-ancestors` 규칙도 보내지 않아요. 다른 사이트가 이 페이지를 보이지 않게 자기 버튼 위에 겹쳐 띄우고, 로그인한 방문자가 앱 안의 무언가를 누르도록 속일 수 있어요. 클릭재킹이라고 불러요.",
+        ),
+        Header::StrictTransportSecurity => (
+            "The running app does not tell browsers to always use HTTPS",
+            "실행 중인 앱이 브라우저에 항상 HTTPS를 쓰라고 알리지 않아요",
+            "Without the `Strict-Transport-Security` header, a browser may first try the unencrypted address, and someone on the same network can read or change that first request.",
+            "`Strict-Transport-Security` 헤더가 없으면 브라우저가 암호화되지 않은 주소로 먼저 접속할 수 있고, 같은 네트워크에 있는 사람이 그 첫 요청을 읽거나 바꿀 수 있어요.",
+        ),
+    };
+    Text {
+        title: LocalizedText {
+            en: title_en.to_owned(),
+            ko: title_ko.to_owned(),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "{why_en} seethru saw this in the answer of the first page of the app you asked it to check. Other pages may differ. The requests it sent are in the proof file."
+            ),
+            ko: format!(
+                "{why_ko} 점검을 요청하신 앱의 첫 페이지 응답에서 확인했어요. 다른 페이지는 다를 수 있어요. 보낸 요청은 증거 파일에 있어요."
+            ),
+        },
+    }
+}
+
+pub(crate) fn cors_open(cors: seethru_probe::Cors) -> Text {
+    use seethru_probe::Cors;
+    let (seen_en, seen_ko) = match cors {
+        Cors::ReflectsWithCredentials => (
+            "seethru sent a request that said it came from a made-up site, and the app answered that this site may read the response together with the visitor's cookies. So any site a logged-in visitor opens can read what the app shows that visitor.",
+            "seethru가 지어낸 사이트에서 온 것처럼 요청을 보냈더니, 앱이 그 사이트가 방문자의 쿠키와 함께 응답을 읽어도 된다고 답했어요. 그래서 로그인한 방문자가 여는 어떤 사이트든 앱이 그 방문자에게 보여 주는 내용을 읽을 수 있어요.",
+        ),
+        Cors::WildcardWithCredentials => (
+            "The app answered that every site may read the response and that cookies are allowed. Browsers refuse this combination, so it does not work as an attack today, but it shows the setting was meant to be open to everyone with logins. A small change, such as echoing the caller's site, would make it exploitable.",
+            "앱이 모든 사이트가 응답을 읽어도 되고 쿠키도 허용한다고 답했어요. 브라우저는 이 조합을 거부해서 지금은 공격이 되지 않지만, 로그인 정보까지 모두에게 열려는 설정이라는 뜻이에요. 호출한 사이트를 그대로 돌려주는 식으로 조금만 바뀌어도 악용할 수 있게 돼요.",
+        ),
+    };
+    Text {
+        title: LocalizedText {
+            en: "The running app lets any site read it with the visitor's login".to_owned(),
+            ko: "실행 중인 앱이 아무 사이트나 방문자의 로그인 상태로 읽을 수 있게 해요".to_owned(),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "{seen_en} Only the first page was checked. The requests are in the proof file."
+            ),
+            ko: format!("{seen_ko} 첫 페이지만 확인했어요. 보낸 요청은 증거 파일에 있어요."),
+        },
+    }
+}
+
 pub(crate) fn memory_wipe_removed(file: &str, line: u32, programs: &[String], sure: bool) -> Text {
     let file = display_name(file);
     let programs = programs
@@ -1149,6 +1219,34 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::BinaryChecksPartial => (
             "In a built program, seethru only checks wipes it recognizes in Rust source: `fill(0)`, `write_bytes` and `memset` with zero, and assigning an array of zeros, when nothing in the function uses the memory afterwards. It matches them to the program by line information, which is not exact in optimized code. Wipes a type does when it is dropped, wipes inside macros and wipes in other languages are not checked. A wipe that is still there does not prove every copy of the secret is cleared.",
             "빌드된 프로그램에서는 Rust 소스에서 알아볼 수 있는 소거만 확인해요. `fill(0)`, 0으로 채우는 `write_bytes`와 `memset`, 0으로 된 배열 대입이고, 함수 안에서 그 뒤로 그 메모리를 쓰지 않을 때예요. 프로그램과는 줄 정보로 맞춰 보는데, 최적화된 코드의 줄 정보는 정확하지 않아요. 타입이 drop될 때 하는 소거, 매크로 안의 소거, 다른 언어의 소거는 확인하지 않아요. 소거가 남아 있어도 비밀의 모든 사본이 지워졌다는 뜻은 아니에요.",
+        ),
+        LimitationCode::ProbeToolNotPermitted => (
+            "You asked to check the running app, but seethru was not allowed to run the tool that sends requests, so nothing was sent and the running app was not checked. Add `--tool curl` to allow it.",
+            "실행 중인 앱을 점검하라고 하셨지만 요청을 보내는 도구를 실행해도 된다는 허락이 없어서, 아무것도 보내지 않았고 실행 중인 앱은 점검하지 않았어요. 허락하려면 `--tool curl`을 붙이세요.",
+        ),
+        LimitationCode::ProbeToolFailed => (
+            "`curl` could not be used, so nothing was sent and the running app was not checked. It was not found, or it did not answer like a version of curl that seethru knows. If it is installed somewhere else, give the full path with `--tool curl=PATH`.",
+            "`curl`을 쓰지 못해서 아무것도 보내지 않았고 실행 중인 앱은 점검하지 않았어요. 도구를 찾지 못했거나, seethru가 아는 curl처럼 답하지 않았어요. 다른 곳에 설치돼 있으면 `--tool curl=경로`로 전체 경로를 알려 주세요.",
+        ),
+        LimitationCode::OwnershipNotVerified => (
+            "seethru could not confirm that this app is yours, so it was not checked. seethru only sends requests to an app that serves the ownership file seethru made for it. Run `seethru own URL`, put the file it shows on the app, deploy, and scan again. If the file was there before, it may have been removed or changed.",
+            "이 앱이 사용자의 것인지 확인하지 못해서 점검하지 않았어요. seethru는 자기가 만들어 준 소유 확인 파일을 내주는 앱에만 요청을 보내요. `seethru own URL`을 실행하고, 안내하는 파일을 앱에 올려 배포한 뒤 다시 검사하세요. 전에 올려 둔 파일이 지워졌거나 바뀌었을 수도 있어요.",
+        ),
+        LimitationCode::ProbeTargetNotResponding => (
+            "The running app stopped answering, answered in a way seethru could not read, or answered from an address seethru does not send to, so the check ended early. What was found before that is still shown. The record of every request is in `.seethru/audit.jsonl`.",
+            "실행 중인 앱이 응답을 멈췄거나, seethru가 읽을 수 없게 응답했거나, seethru가 요청을 보내지 않는 주소에서 응답해서 점검을 일찍 끝냈어요. 그 전에 찾은 것은 그대로 보여 줘요. 보낸 요청은 모두 `.seethru/audit.jsonl`에 기록돼 있어요.",
+        ),
+        LimitationCode::ProbeRedirectedOutside => (
+            "The running app sent seethru to another site. seethru only sends requests to the address you proved is yours, so it did not follow and the check ended there.",
+            "실행 중인 앱이 seethru를 다른 사이트로 보내려고 했어요. seethru는 소유를 확인한 주소에만 요청을 보내기 때문에 따라가지 않았고, 점검은 거기서 끝났어요.",
+        ),
+        LimitationCode::ProbePageNotRead => (
+            "The first address of the running app did not answer with a web page, so its security headers were not checked. This is normal for an app that only serves an API.",
+            "실행 중인 앱의 첫 주소가 웹 페이지로 응답하지 않아서 보안 헤더는 확인하지 않았어요. API만 제공하는 앱에서는 이렇게 나와요.",
+        ),
+        LimitationCode::ProbeChecksPartial => (
+            "On the running app, seethru only read the first page. It checked four security headers and whether the page lets any other site read it with the visitor's login. Other pages and API addresses, logging in, and whether one account can read another account's data were not checked. seethru only reads: it sends a few plain GET requests, slowly, and does not keep what the pages contain.",
+            "실행 중인 앱에서는 첫 페이지만 읽었어요. 보안 헤더 네 가지와, 다른 사이트가 방문자의 로그인 상태로 이 페이지를 읽을 수 있는지를 확인했어요. 다른 페이지와 API 주소, 로그인, 한 계정이 다른 계정의 데이터를 읽을 수 있는지는 확인하지 않았어요. seethru는 읽기만 해요. 평범한 GET 요청 몇 개를 천천히 보내고, 페이지 내용은 저장하지 않아요.",
         ),
         LimitationCode::CompiledOutputPartlyRead => (
             "Part of the compiled output was left out because it was too large, could not be read, or points at files outside this project.",

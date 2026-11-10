@@ -9,6 +9,7 @@ mod external;
 mod glob;
 mod graph;
 mod native;
+mod observed;
 mod resolve;
 mod roles;
 mod rules;
@@ -40,6 +41,7 @@ use supabase::Migrations;
 
 pub use binary::{BinaryCode, BinaryInput, CodeReader};
 pub use config::CONFIG_FILE;
+pub use observed::Observed;
 
 const MAX_RESOLVER_CONFIG_BYTES: usize = 256 * 1024;
 
@@ -83,6 +85,7 @@ pub struct ScanOptions {
     pub llvm_ir: Vec<PathBuf>,
     pub binaries: Vec<BinaryInput>,
     pub binary_problems: Vec<LimitationCode>,
+    pub observed: Option<Observed>,
 }
 
 impl Default for ScanOptions {
@@ -95,6 +98,7 @@ impl Default for ScanOptions {
             llvm_ir: Vec::new(),
             binaries: Vec::new(),
             binary_problems: Vec::new(),
+            observed: None,
         }
     }
 }
@@ -319,6 +323,10 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         &mut graph,
         &|rel_path| workspace.package_of(rel_path),
     );
+    let seen = options
+        .observed
+        .as_ref()
+        .map(|observed| observed::emit(observed, &mut graph));
     if let Some(build) = &build {
         for route in &build.routes {
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
@@ -475,6 +483,10 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     }
     inputs.extend(checked.inputs);
     limitations.extend(checked.limitations.into_iter().map(rules::limitation));
+    if let Some(seen) = seen {
+        inputs.extend(seen.inputs);
+        limitations.extend(seen.limitations.into_iter().map(rules::limitation));
+    }
     if let Some(compiled) = &build_list {
         inputs.push(Input::CompileDatabase {
             path: compiled.rel.clone(),

@@ -266,6 +266,14 @@ fn rule_text(rule: RuleId, lang: Lang) -> &'static str {
             "Code that clears a secret from memory is written in the source, but the program that was built has no code for it.",
             "비밀을 메모리에서 지우는 코드가 소스에는 있는데, 빌드된 프로그램에는 그 코드가 없어요.",
         ),
+        RuleId::SecurityHeaderMissing => (
+            "The running app answers without a security header that browsers use to protect its visitors.",
+            "실행 중인 앱이 브라우저가 방문자를 보호할 때 쓰는 보안 헤더 없이 응답해요.",
+        ),
+        RuleId::CorsAllowsAnyOriginWithCredentials => (
+            "The running app tells browsers that any site may read its responses together with the visitor's cookies.",
+            "실행 중인 앱이 어떤 사이트든 방문자의 쿠키와 함께 응답을 읽어도 된다고 브라우저에 알려요.",
+        ),
         RuleId::CargoDependencyNotPinned => (
             "A Cargo dependency is not fixed to one version and the project has no Cargo.lock.",
             "Cargo 의존성이 한 버전으로 고정돼 있지 않고 프로젝트에 Cargo.lock이 없어요.",

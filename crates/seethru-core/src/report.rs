@@ -93,6 +93,20 @@ pub enum Input {
         tools: Vec<ToolUse>,
         lines: u32,
     },
+    Probe {
+        environment: ProbeEnvironment,
+        tools: Vec<ToolUse>,
+        requests: u32,
+    },
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum ProbeEnvironment {
+    Staging,
+    Production,
 }
 
 #[derive(
@@ -133,6 +147,7 @@ pub enum InputKind {
     CompileDatabase,
     CompiledOutput,
     Binary,
+    Probe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -169,6 +184,13 @@ pub enum LimitationCode {
     BinaryWithoutLineInfo,
     BinaryWipesNotConfirmed,
     BinaryChecksPartial,
+    ProbeToolNotPermitted,
+    ProbeToolFailed,
+    OwnershipNotVerified,
+    ProbeTargetNotResponding,
+    ProbeRedirectedOutside,
+    ProbePageNotRead,
+    ProbeChecksPartial,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -625,6 +647,8 @@ pub enum RuleId {
     CargoDependencyNotPinned,
     StopOnOutsideInput,
     MemoryWipeRemoved,
+    SecurityHeaderMissing,
+    CorsAllowsAnyOriginWithCredentials,
 }
 
 impl RuleId {
@@ -651,6 +675,8 @@ impl RuleId {
             Self::CargoDependencyNotPinned => "cargo-dependency-not-pinned",
             Self::StopOnOutsideInput => "stop-on-outside-input",
             Self::MemoryWipeRemoved => "memory-wipe-removed",
+            Self::SecurityHeaderMissing => "security-header-missing",
+            Self::CorsAllowsAnyOriginWithCredentials => "cors-allows-any-origin-with-credentials",
         }
     }
 
@@ -672,6 +698,8 @@ impl RuleId {
             Self::CargoDependencyNotPinned => &[829],
             Self::StopOnOutsideInput => &[248],
             Self::MemoryWipeRemoved => &[14],
+            Self::SecurityHeaderMissing => &[693],
+            Self::CorsAllowsAnyOriginWithCredentials => &[942],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing | Self::External => &[],
         }
@@ -752,6 +780,15 @@ impl Origin {
         }
     }
 
+    pub fn seethru_with_probe(tools: Vec<String>) -> Self {
+        Self {
+            engine: "seethru".to_owned(),
+            inputs: vec![InputKind::Probe],
+            rule: None,
+            tools,
+        }
+    }
+
     pub fn seethru_with_build_output() -> Self {
         Self {
             engine: "seethru".to_owned(),
@@ -767,6 +804,16 @@ impl Origin {
 )]
 #[serde(transparent)]
 pub struct ProofRef(String);
+
+impl ProofRef {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

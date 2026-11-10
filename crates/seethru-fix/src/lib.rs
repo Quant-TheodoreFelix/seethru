@@ -156,6 +156,10 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
         (RuleId::SecretDependentDivision, _) => secret_division(&place, lang),
         (RuleId::StopOnOutsideInput, _) => stop_on_outside_input(&place, lang),
         (RuleId::MemoryWipeRemoved, _) => memory_wipe_removed(&place, lang),
+        (RuleId::SecurityHeaderMissing, _) => {
+            security_header_missing(finding.id.rsplit(':').next().unwrap_or_default(), lang)
+        }
+        (RuleId::CorsAllowsAnyOriginWithCredentials, _) => cors_open(lang),
         (RuleId::CargoDependencyNotPinned, _) => dependency_not_pinned(&clean(label), &place, lang),
         _ => format!("{}{place}", clean(finding.title.get(lang))),
     };
@@ -500,6 +504,66 @@ fn memory_wipe_removed(place: &str, lang: Lang) -> String {
              4. `black_box`나 평범한 반복문은 쓰지 마. 둘 다 남는다는 보장이 없어.\n\
              5. 이 코드 근처에 같은 패턴이 있는지(예: `Drop`, 오류 경로) 찾아서 같은 방식으로 고쳐 줘. 그런 다음 다시 빌드하고 검사를 다시 돌리라고 알려 줘. 소거가 남았는지는 빌드된 프로그램에서만 보여."
         ),
+    }
+}
+
+fn security_header_missing(header: &str, lang: Lang) -> String {
+    let (name, value_en, value_ko) = match header {
+        "content-security-policy" => (
+            "Content-Security-Policy",
+            "Start from `default-src 'self'` and add only the sources the app really loads. Do not add `'unsafe-inline'` or `*` just to make errors go away. If the app breaks, first send the same policy as `Content-Security-Policy-Report-Only`, tell me what the browser console reports, and tighten from there.",
+            "`default-src 'self'`에서 시작해서 앱이 실제로 불러오는 출처만 추가해 줘. 오류를 없애려고 `'unsafe-inline'`이나 `*`를 넣지는 마. 앱이 깨지면 먼저 같은 정책을 `Content-Security-Policy-Report-Only`로 보내고, 브라우저 콘솔에 무엇이 나오는지 알려 준 다음 거기서부터 좁혀 줘.",
+        ),
+        "x-content-type-options" => (
+            "X-Content-Type-Options",
+            "The value is `nosniff`.",
+            "값은 `nosniff`야.",
+        ),
+        "frame-protection" => (
+            "Content-Security-Policy",
+            "Add the rule `frame-ancestors 'none'` to the policy, or `frame-ancestors 'self'` if the app shows its own pages in a frame. If the app sends no content security policy yet, send `X-Frame-Options: DENY` (or `SAMEORIGIN`) instead. If another site of mine is meant to embed this app, ask me which one before choosing.",
+            "정책에 `frame-ancestors 'none'` 규칙을 넣어 줘. 앱이 자기 페이지를 프레임에 띄운다면 `frame-ancestors 'self'`로 해 줘. 아직 콘텐츠 보안 정책을 보내지 않는 앱이면 대신 `X-Frame-Options: DENY`(또는 `SAMEORIGIN`)를 보내 줘. 내 다른 사이트가 이 앱을 끼워 넣어야 한다면 어느 사이트인지 나한테 먼저 물어봐.",
+        ),
+        _ => (
+            "Strict-Transport-Security",
+            "Use `max-age=31536000`. Add `includeSubDomains` only after asking me, because it also forces HTTPS on every subdomain. Send it only on HTTPS responses.",
+            "`max-age=31536000`으로 해 줘. `includeSubDomains`는 모든 하위 도메인에도 HTTPS를 강제하니까 나한테 물어본 다음에 넣어 줘. HTTPS 응답에만 보내 줘.",
+        ),
+    };
+    match lang {
+        Lang::En => format!(
+            "My deployed app answers without the security header `{name}`. A check of the running app saw this on its first page.\n\
+             1. Find where this project sets response headers for every page. Depending on the stack this is the framework config (for example `headers()` in `next.config.js`), a middleware, or the hosting config (for example `vercel.json`, `netlify.toml`, `_headers`, nginx). Use the place the project already uses. Do not add a new dependency without asking me first.\n\
+             2. Add `{name}` to all pages. {value_en}\n\
+             3. Do not remove or loosen any header that is already set.\n\
+             4. Tell me which file you changed and that I need to deploy and run the check again, because only the running app shows whether the header is sent."
+        ),
+        Lang::Ko => format!(
+            "배포한 내 앱이 보안 헤더 `{name}` 없이 응답해. 실행 중인 앱을 점검했더니 첫 페이지에서 확인됐어.\n\
+             1. 이 프로젝트에서 모든 페이지의 응답 헤더를 정하는 곳을 찾아 줘. 스택에 따라 프레임워크 설정(예: `next.config.js`의 `headers()`), 미들웨어, 호스팅 설정(예: `vercel.json`, `netlify.toml`, `_headers`, nginx) 중 하나야. 프로젝트가 이미 쓰는 곳을 써 줘. 새 의존성은 나한테 먼저 물어보고 추가해.\n\
+             2. 모든 페이지에 `{name}`를 추가해 줘. {value_ko}\n\
+             3. 이미 설정된 헤더는 지우거나 느슨하게 만들지 마.\n\
+             4. 어느 파일을 바꿨는지 알려 주고, 배포한 뒤 점검을 다시 돌려야 한다고 알려 줘. 헤더가 실제로 나가는지는 실행 중인 앱에서만 보여."
+        ),
+    }
+}
+
+fn cors_open(lang: Lang) -> String {
+    match lang {
+        Lang::En => "My deployed app tells browsers that any site may read its responses together with the visitor's cookies. A check of the running app sent a request from a made-up site and the app allowed it with credentials.\n\
+             1. Find where this project sets CORS. Look for `Access-Control-Allow-Origin`, a `cors` middleware or package, framework config, and hosting config.\n\
+             2. Replace any setting that echoes the caller's `Origin` or allows every origin with a fixed list of the sites that really need to call this app. Ask me for that list if the code does not make it clear. Compare the whole origin exactly. Do not match by prefix, suffix or a loose pattern.\n\
+             3. Send `Access-Control-Allow-Credentials: true` only for origins on that list. If no other site needs to call this app with cookies, remove that header.\n\
+             4. When the allowed origin depends on the request, also send `Vary: Origin`.\n\
+             5. Tell me which file you changed and that I need to deploy and run the check again, because only the running app shows the result."
+            .to_owned(),
+        Lang::Ko => "배포한 내 앱이 어떤 사이트든 방문자의 쿠키와 함께 응답을 읽어도 된다고 브라우저에 알려. 실행 중인 앱을 점검할 때 지어낸 사이트에서 온 것처럼 요청을 보냈는데 앱이 로그인 정보까지 허용했어.\n\
+             1. 이 프로젝트에서 CORS를 정하는 곳을 찾아 줘. `Access-Control-Allow-Origin`, `cors` 미들웨어나 패키지, 프레임워크 설정, 호스팅 설정을 살펴봐.\n\
+             2. 호출한 쪽의 `Origin`을 그대로 돌려주거나 모든 출처를 허용하는 설정을, 이 앱을 정말 호출해야 하는 사이트의 고정 목록으로 바꿔 줘. 코드만 봐서 목록을 알 수 없으면 나한테 물어봐. 출처 전체를 정확히 비교해 줘. 앞부분, 뒷부분, 느슨한 패턴으로 맞추지 마.\n\
+             3. `Access-Control-Allow-Credentials: true`는 그 목록에 있는 출처에만 보내 줘. 쿠키와 함께 이 앱을 호출해야 하는 다른 사이트가 없으면 그 헤더를 지워 줘.\n\
+             4. 허용하는 출처가 요청에 따라 달라지면 `Vary: Origin`도 보내 줘.\n\
+             5. 어느 파일을 바꿨는지 알려 주고, 배포한 뒤 점검을 다시 돌려야 한다고 알려 줘. 결과는 실행 중인 앱에서만 보여."
+            .to_owned(),
     }
 }
 

@@ -586,6 +586,36 @@
             "lines"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "environment": {
+              "$ref": "#/$defs/ProbeEnvironment"
+            },
+            "requests": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tools": {
+              "items": {
+                "$ref": "#/$defs/ToolUse"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "probe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "environment",
+            "tools",
+            "requests"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -596,7 +626,8 @@
         "sarif",
         "compileDatabase",
         "compiledOutput",
-        "binary"
+        "binary",
+        "probe"
       ],
       "type": "string"
     },
@@ -639,7 +670,14 @@
         "binaryNotFound",
         "binaryWithoutLineInfo",
         "binaryWipesNotConfirmed",
-        "binaryChecksPartial"
+        "binaryChecksPartial",
+        "probeToolNotPermitted",
+        "probeToolFailed",
+        "ownershipNotVerified",
+        "probeTargetNotResponding",
+        "probeRedirectedOutside",
+        "probePageNotRead",
+        "probeChecksPartial"
       ],
       "type": "string"
     },
@@ -938,6 +976,13 @@
       ],
       "type": "string"
     },
+    "ProbeEnvironment": {
+      "enum": [
+        "staging",
+        "production"
+      ],
+      "type": "string"
+    },
     "RlsStatus": {
       "enum": [
         "enabled",
@@ -968,7 +1013,9 @@
         "secret-dependent-division",
         "cargo-dependency-not-pinned",
         "stop-on-outside-input",
-        "memory-wipe-removed"
+        "memory-wipe-removed",
+        "security-header-missing",
+        "cors-allows-any-origin-with-credentials"
       ],
       "type": "string"
     },
