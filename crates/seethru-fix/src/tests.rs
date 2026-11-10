@@ -372,3 +372,76 @@ fn outside_scanner_prompt_keeps_scanner_text_out() {
     }
     assert!(has_hangul(&fix_prompt(&report, &finding, Lang::Ko)));
 }
+
+#[test]
+fn rust_prompts_name_the_line_and_ask_for_a_rebuild() {
+    let finding = |rule: RuleId, node: &str, path: &str| Finding {
+        id: format!("{}:{node}", rule.as_str()),
+        rule,
+        severity: Severity::Medium,
+        confidence: Confidence::Likely,
+        title: LocalizedText::default(),
+        explanation: LocalizedText::default(),
+        node: NodeId::new(node),
+        location: Some(Location {
+            path: path.to_owned(),
+            line: 18,
+            column: 1,
+        }),
+        evidence: Vec::new(),
+        origin: Origin::seethru_with_compiled_output(),
+        cwe: rule.cwe().to_vec(),
+        proof: None,
+        fix_prompt: None,
+        accepted: None,
+    };
+    let division = finding(
+        RuleId::SecretDependentDivision,
+        "file:vault/src/lib.rs",
+        "vault/src/lib.rs",
+    );
+    let loose = finding(
+        RuleId::CargoDependencyNotPinned,
+        "dependency:cargo:app:remote",
+        "Cargo.toml",
+    );
+    let report = ScanReport {
+        schema_version: SCHEMA_VERSION,
+        tool: ToolInfo {
+            name: "seethru".to_owned(),
+            version: "0.0.0".to_owned(),
+        },
+        target: TargetInfo {
+            name: "app".to_owned(),
+            files_scanned: 1,
+            files_skipped: 0,
+            files_excluded: 0,
+            truncated: false,
+            config_file: None,
+            ecosystems: Vec::new(),
+            inputs: Vec::new(),
+            limitations: Vec::new(),
+        },
+        summary: Summary::default(),
+        nodes: vec![Node {
+            id: NodeId::new("dependency:cargo:app:remote"),
+            label: "remote".to_owned(),
+            kind: NodeKind::Service {},
+            zone: Zone::ThirdParty,
+            location: None,
+        }],
+        edges: Vec::new(),
+        findings: vec![division.clone(), loose.clone()],
+    };
+    for lang in Lang::ALL {
+        let prompt = fix_prompt(&report, &division, lang);
+        assert!(prompt.contains("`vault/src/lib.rs:18`"), "{prompt}");
+        assert!(prompt.contains("rem_euclid"), "{prompt}");
+        let prompt = fix_prompt(&report, &loose, lang);
+        assert!(prompt.contains("`remote`"), "{prompt}");
+        assert!(prompt.contains("`Cargo.lock`"), "{prompt}");
+    }
+    assert!(fix_prompt(&report, &division, Lang::En).contains("build again"));
+    assert!(has_hangul(&fix_prompt(&report, &division, Lang::Ko)));
+    assert!(has_hangul(&fix_prompt(&report, &loose, Lang::Ko)));
+}
