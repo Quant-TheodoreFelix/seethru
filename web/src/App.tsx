@@ -12,16 +12,21 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { InlineText } from "./InlineText";
 import { layoutReport, type GraphNode } from "./layout";
 import { readEmbeddedReport, readReportFile } from "./loadReport";
 import {
-  SEVERITIES,
+  LIST_VIEWS,
   edgeKindsIn,
+  findingsIn,
+  isSeverity,
+  viewCount,
+  viewOf,
   type Confidence,
   type EdgeKind,
   type Finding,
+  type ListView,
   type ReportNode,
   type ScanReport,
   type Severity,
@@ -187,24 +192,6 @@ function Evidence({ finding, nodes }: { finding: Finding; nodes: Map<string, Rep
   );
 }
 
-function Limitations({ report }: { report: ScanReport }) {
-  const lang = useCurrentLang();
-  const m = useMessages();
-  if (report.target.limitations.length === 0) return null;
-  return (
-    <section className="limitations" aria-label={m.limitations}>
-      <h3>{m.limitations}</h3>
-      <ul>
-        {report.target.limitations.map((limitation) => (
-          <li key={limitation.code}>
-            <InlineText text={limitation.text[lang]} />
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function minimapClass(node: GraphNode) {
   return node.data.severity ? `sev-${node.data.severity}` : "";
 }
@@ -246,6 +233,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [layoutError, setLayoutError] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
+  const [view, setView] = useState<ListView>();
   const list = useRef<HTMLDivElement>(null);
   const flow = useReactFlow<GraphNode>();
   const lang = useCurrentLang();
@@ -270,21 +258,25 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   }, [report, flow]);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || !view) return;
     list.current
       ?.querySelector(`[data-finding="${CSS.escape(selectedId)}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [selectedId]);
+  }, [selectedId, view]);
 
   const selected = useMemo(() => report.findings.find((finding) => finding.id === selectedId), [report, selectedId]);
-  const open = useMemo(() => report.findings.filter((finding) => !finding.accepted), [report]);
-  const accepted = useMemo(() => report.findings.filter((finding) => finding.accepted), [report]);
+  const listed = useMemo(() => (view ? findingsIn(report, view) : []), [report, view]);
+  const views = useMemo(
+    () => LIST_VIEWS.filter((item) => isSeverity(item) || viewCount(report, item) > 0),
+    [report],
+  );
   const edgeKinds = useMemo(() => edgeKindsIn(report), [report]);
   const nodeById = useMemo(() => new Map(report.nodes.map((node) => [node.id, node])), [report]);
 
   const focus = useCallback(
     (finding: Finding) => {
       setSelectedId(finding.id);
+      setView((current) => (current ? viewOf(finding) : current));
       const path = new Set<string>([finding.node]);
       for (const step of finding.evidence) if (step.node) path.add(step.node);
       setNodes((current) => current.map((node) => ({ ...node, selected: path.has(node.id) })));
@@ -303,62 +295,73 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
     setNodes((current) => current.map((node) => ({ ...node, selected: false })));
   }, []);
 
+  const viewTitle = (item: ListView) =>
+    isSeverity(item) ? m.severity[item] : item === "accepted" ? m.acceptedTitle : m.limitations;
+
   return (
     <div className="workspace">
-      <aside className="sidebar" aria-label={m.findings}>
-        <div className="sidebar-head">
-          <h2>{m.findings}</h2>
-          <span className="sidebar-count">{open.length}</span>
-        </div>
-        {open.length === 0 ? <p className="empty">{m.noProblems}</p> : null}
-        <div ref={list}>
-          <ol className="findings">
-            {open.map((finding, index) => (
-              <FindingRow
-                key={finding.id}
-                finding={finding}
-                label={String(index + 1).padStart(2, "0")}
-                active={finding.id === selectedId}
-                onSelect={focus}
-              />
-            ))}
-          </ol>
-          {accepted.length > 0 ? (
-            <section className="accepted" aria-label={m.acceptedTitle}>
-              <div className="accepted-head">
-                <h3>{m.acceptedTitle}</h3>
-                <span className="sidebar-count">{accepted.length}</span>
-              </div>
-              <p className="accepted-note">{m.acceptedNote(report.target.configFile ?? "seethru.toml")}</p>
-              <ol className="findings">
-                {accepted.map((finding) => (
-                  <FindingRow
-                    key={finding.id}
-                    finding={finding}
-                    label={m.acceptedLabel}
-                    active={finding.id === selectedId}
-                    onSelect={focus}
-                  />
-                ))}
-              </ol>
-            </section>
-          ) : null}
-          <Limitations report={report} />
-        </div>
-      </aside>
-      <main className="stage">
-        <dl className="summary">
-          {SEVERITIES.map((severity) => {
-            const count = report.summary[severity];
-            return (
-              <div key={severity} className={`summary-cell sev-${severity} ${count > 0 ? "has-findings" : "is-zero"}`}>
-                <dt className="tag">{m.severity[severity]}</dt>
-                <dd>{count}</dd>
-              </div>
-            );
-          })}
-        </dl>
-        <div className="canvas">
+      <ul className="summary" aria-label={m.findings} style={{ "--cells": views.length } as CSSProperties}>
+        {views.map((item) => {
+          const count = viewCount(report, item);
+          const extra = !isSeverity(item);
+          return (
+            <li key={item}>
+              <button
+                type="button"
+                className={`summary-cell ${extra ? "is-extra" : `sev-${item}`} ${count > 0 ? "" : "is-zero"}`}
+                aria-pressed={view === item}
+                aria-controls="finding-list"
+                disabled={count === 0}
+                onClick={() => setView((current) => (current === item ? undefined : item))}
+              >
+                <span className={`tag ${extra ? "is-plain" : ""}`}>{viewTitle(item)}</span>
+                <span className="summary-count">{count}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className={`board ${view ? "has-list" : ""}`}>
+        {view ? (
+          <aside className="sidebar" id="finding-list" aria-label={viewTitle(view)}>
+            <div className="sidebar-head">
+              <h2>{viewTitle(view)}</h2>
+              <span className="sidebar-count">{viewCount(report, view)}</span>
+              <button type="button" className="button quiet" onClick={() => setView(undefined)}>
+                {m.close}
+              </button>
+            </div>
+            <div ref={list}>
+              {view === "limitations" ? (
+                <ul className="limitations">
+                  {report.target.limitations.map((limitation) => (
+                    <li key={limitation.code}>
+                      <InlineText text={limitation.text[lang]} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <>
+                  {view === "accepted" ? (
+                    <p className="accepted-note">{m.acceptedNote(report.target.configFile ?? "seethru.toml")}</p>
+                  ) : null}
+                  <ol className="findings">
+                    {listed.map((finding, index) => (
+                      <FindingRow
+                        key={finding.id}
+                        finding={finding}
+                        label={finding.accepted ? m.acceptedLabel : String(index + 1).padStart(2, "0")}
+                        active={finding.id === selectedId}
+                        onSelect={focus}
+                      />
+                    ))}
+                  </ol>
+                </>
+              )}
+            </div>
+          </aside>
+        ) : null}
+        <main className="canvas">
           {layoutError ? <p className="error">{m.layoutError(layoutError)}</p> : null}
           <ReactFlow
             nodes={nodes}
@@ -439,8 +442,8 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
               </motion.section>
             ) : null}
           </AnimatePresence>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

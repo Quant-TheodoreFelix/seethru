@@ -52,12 +52,24 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
+  padding: 0 var(--gutter) var(--gutter);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.board.has-list {
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
 }
 
 .sidebar {
   min-height: 0;
+  margin-left: calc(var(--gutter) * -1);
   overflow-y: auto;
   padding-bottom: var(--gutter);
 }
@@ -69,8 +81,12 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 14px var(--gutter) 14px;
+  padding: 4px var(--gutter) 14px;
   background: var(--bg);
+}
+
+.sidebar-head .button {
+  margin-left: auto;
 }
 
 .sidebar-head h2 {
@@ -83,12 +99,6 @@
   color: var(--faint);
   font-size: 30px;
   line-height: 1;
-}
-
-.empty {
-  margin: 0;
-  padding: 8px var(--gutter);
-  color: var(--muted);
 }
 
 .findings {
@@ -188,29 +198,8 @@
   color: inherit;
 }
 
-.accepted {
-  margin-top: 28px;
-}
-
-.accepted-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 0 var(--gutter);
-}
-
-.accepted-head h3 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1;
-}
-
-.accepted-head .sidebar-count {
-  font-size: 22px;
-}
-
 .accepted-note {
-  margin: 8px 0 4px;
+  margin: 0 0 4px;
   padding: 0 var(--gutter);
   color: var(--muted);
   font-size: 14px;
@@ -235,61 +224,75 @@
 }
 
 .limitations {
-  margin-top: 28px;
-  padding: 0 var(--gutter);
-}
-
-.limitations h3 {
-  margin: 0 0 8px;
-  font-size: 22px;
-  line-height: 1;
-}
-
-.limitations ul {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   margin: 0;
-  padding: 0;
+  padding: 4px var(--gutter) 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   list-style: none;
 }
 
-.stage {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  padding: 0 var(--gutter) var(--gutter) 0;
-}
-
 .summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  margin: 0;
-  padding: 6px 0 18px;
+  grid-template-columns: repeat(var(--cells, 5), minmax(0, 1fr));
+  margin: 0 -12px;
+  padding: 0 0 14px;
+  list-style: none;
 }
 
 .summary-cell {
   display: grid;
   gap: 12px;
-  padding: 8px 0 0;
+  width: 100%;
+  padding: 12px 12px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
 }
 
-.summary-cell dt {
+.summary-cell:hover {
+  background: var(--hover);
+}
+
+.summary-cell[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.summary-cell[aria-pressed="true"] .tag {
+  color: inherit;
+}
+
+.summary-cell .tag {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.summary-cell dd {
-  margin: 0;
+.tag.is-plain::before {
+  content: none;
+}
+
+.summary-count {
   font-size: 44px;
   line-height: 0.9;
 }
 
-.summary-cell.is-zero dd,
-.summary-cell.is-zero dt {
+.summary-cell.is-zero {
+  cursor: default;
+}
+
+.summary-cell.is-zero:hover {
+  background: transparent;
+}
+
+.summary-cell.is-zero .summary-count,
+.summary-cell.is-zero .tag {
   color: var(--faint);
 }
 
@@ -562,11 +565,12 @@
     gap: 4px;
   }
 
-  .workspace {
+  .board.has-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
+    margin-right: calc(var(--gutter) * -1);
     overflow: visible;
   }
 
@@ -574,21 +578,23 @@
     position: static;
   }
 
-  .stage {
-    padding: 0 var(--gutter) var(--gutter);
+  .summary {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin: 0 -8px;
   }
 
-  .summary-cell dt {
+  .summary-cell {
+    padding: 10px 8px 8px;
+  }
+
+  .summary-cell .tag {
     max-width: 100%;
+    gap: 5px;
     font-size: 9px;
     letter-spacing: 0.08em;
   }
 
-  .summary-cell .tag {
-    gap: 5px;
-  }
-
-  .summary-cell dd {
+  .summary-count {
     font-size: 32px;
   }
 
@@ -618,7 +624,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .finding {
+  .finding,
+  .summary-cell {
     transition: none;
   }
 }

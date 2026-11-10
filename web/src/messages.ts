@@ -65,7 +65,6 @@ export interface Messages {
   readError: (detail: string) => string;
   layoutError: (detail: string) => string;
   findings: string;
-  noProblems: string;
   lineStyles: string;
   selectedFinding: string;
   close: string;
@@ -203,7 +202,6 @@ const en: Messages = {
   readError: (detail) => `Could not read the report file (${detail})`,
   layoutError: (detail) => `Could not draw the graph (${detail})`,
   findings: "Findings",
-  noProblems: "No problems found.",
   lineStyles: "Line styles",
   selectedFinding: "Selected finding",
   close: "Close",
@@ -336,7 +334,6 @@ const ko: Messages = {
   readError: (detail) => `리포트 파일을 읽지 못했어요 (${detail})`,
   layoutError: (detail) => `그래프를 그리지 못했어요 (${detail})`,
   findings: "발견한 문제",
-  noProblems: "발견한 문제가 없어요.",
   lineStyles: "선 종류",
   selectedFinding: "선택한 문제",
   close: "닫기",

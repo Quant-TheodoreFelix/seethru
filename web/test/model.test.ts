@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src/model.ts";
+import {
+  LIST_VIEWS,
+  ReportError,
+  edgeKindsIn,
+  findingsIn,
+  parseScanReport,
+  viewCount,
+  viewOf,
+  worstSeverity,
+} from "../src/model.ts";
 
 function validReport(): Record<string, unknown> {
   return {
@@ -282,4 +291,29 @@ test("reads compiled output inputs and package units", () => {
   assert.deepEqual(parsed.findings[0]?.origin.inputs, ["source", "compiledOutput"]);
   report.target.inputs = [{ type: "compiledOutput", path: "target/ir", files: 2, functions: 40 }];
   assert.throws(() => parseScanReport(report), ReportError);
+});
+
+test("groups findings by the count they are shown under", () => {
+  const input = validReport();
+  const findings = input.findings as Record<string, unknown>[];
+  findings.push({ ...findings[0], id: "second", accepted: { reason: "known" } });
+  input.summary = { critical: 1, high: 0, medium: 0, low: 0, info: 0, accepted: 1 };
+  (input.target as Record<string, unknown>).configFile = "seethru.toml";
+  const report = parseScanReport(input);
+
+  assert.deepEqual(
+    findingsIn(report, "critical").map((finding) => finding.id),
+    ["supabase-rls-disabled:table:public.todos"],
+  );
+  assert.deepEqual(
+    findingsIn(report, "accepted").map((finding) => finding.id),
+    ["second"],
+  );
+  assert.deepEqual(findingsIn(report, "high"), []);
+  assert.deepEqual(findingsIn(report, "limitations"), []);
+  assert.equal(viewOf(report.findings[1]!), "accepted");
+  assert.deepEqual(
+    LIST_VIEWS.map((view) => viewCount(report, view)),
+    [1, 0, 0, 0, 0, 1, 1],
+  );
 });

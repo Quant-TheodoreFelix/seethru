@@ -555,3 +555,22 @@ export function edgeKindsIn(report: Pick<ScanReport, "edges">): EdgeKind[] {
   const present = new Set(report.edges.map((edge) => edge.kind));
   return EDGE_KINDS.filter((kind) => present.has(kind));
 }
+
+export const LIST_VIEWS = [...SEVERITIES, "accepted", "limitations"] as const;
+export type ListView = (typeof LIST_VIEWS)[number];
+
+export function isSeverity(view: ListView): view is Severity {
+  return view !== "accepted" && view !== "limitations";
+}
+
+export function viewOf(finding: Pick<Finding, "severity" | "accepted">): ListView {
+  return finding.accepted ? "accepted" : finding.severity;
+}
+
+export function findingsIn(report: Pick<ScanReport, "findings">, view: ListView): Finding[] {
+  return report.findings.filter((finding) => viewOf(finding) === view);
+}
+
+export function viewCount(report: Pick<ScanReport, "summary" | "target">, view: ListView): number {
+  return view === "limitations" ? report.target.limitations.length : report.summary[view];
+}
