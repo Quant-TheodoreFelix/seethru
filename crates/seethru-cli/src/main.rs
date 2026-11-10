@@ -680,6 +680,9 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
             }
         }
     }
+    if let Some(machine) = &target.machine_code {
+        write_machine_code(out, machine, lang)?;
+    }
     if !target.limitations.is_empty() {
         let heading = match lang {
             Lang::En => "Not checked",
@@ -689,6 +692,104 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
         for limitation in &target.limitations {
             writeln!(out, "- {}", limitation.text.get(lang))?;
         }
+    }
+    Ok(())
+}
+
+fn write_machine_code(
+    out: &mut impl Write,
+    machine: &seethru_core::MachineCode,
+    lang: Lang,
+) -> io::Result<()> {
+    const SHOWN: usize = 20;
+    let more = |out: &mut dyn Write, total: usize| match (total.saturating_sub(SHOWN), lang) {
+        (0, _) => Ok(()),
+        (rest, Lang::En) => writeln!(out, "    and {rest} more in the report"),
+        (rest, Lang::Ko) => writeln!(out, "    나머지 {rest}줄은 리포트에 있어요"),
+    };
+    let lines = machine.division_lines.len();
+    let open: Vec<_> = machine
+        .division_lines
+        .iter()
+        .filter(|line| !line.secret)
+        .collect();
+    let found = lines - open.len();
+    let divisions = machine.divisions;
+    match lang {
+        Lang::En => writeln!(
+            out,
+            "\nIn the machine code\n- Division instructions: {divisions}. Lines of this project that have one: {lines}, of which findings: {found}"
+        )?,
+        Lang::Ko => writeln!(
+            out,
+            "\n기계어에서 본 것\n- 나눗셈 명령 {divisions}개. 이 프로젝트에서 나눗셈 명령이 있는 줄 {lines}개, 그중 탐지 {found}개"
+        )?,
+    }
+    if !open.is_empty() {
+        match lang {
+            Lang::En => writeln!(out, "  Lines seethru did not tie to a secret:")?,
+            Lang::Ko => writeln!(out, "  비밀과 잇지 못한 줄:")?,
+        }
+        for line in open.iter().take(SHOWN) {
+            writeln!(out, "    {}:{}", line.path, line.line)?;
+        }
+        more(out, open.len())?;
+    }
+    match (machine.divisions_without_line, lang) {
+        (0, _) => {}
+        (count, Lang::En) => writeln!(
+            out,
+            "  Instructions not matched to a line of this project: {count}"
+        )?,
+        (count, Lang::Ko) => writeln!(out, "  이 프로젝트의 줄과 맞추지 못한 명령 {count}개")?,
+    }
+    if machine.assembly_blocks == 0 {
+        return Ok(());
+    }
+    let marked: Vec<_> = machine
+        .assembly_lines
+        .iter()
+        .filter(|line| line.divides || line.branches)
+        .collect();
+    let (blocks, lines, count) = (
+        machine.assembly_blocks,
+        machine.assembly_lines.len(),
+        marked.len(),
+    );
+    match lang {
+        Lang::En => writeln!(
+            out,
+            "- Hand-written assembly blocks: {blocks}, on lines of this project: {lines}. Lines with a division or a conditional jump: {count}"
+        )?,
+        Lang::Ko => writeln!(
+            out,
+            "- 직접 쓴 어셈블리 블록 {blocks}개, 이 프로젝트의 줄 {lines}개. 나눗셈이나 조건 분기가 있는 줄 {count}개"
+        )?,
+    }
+    for line in marked.iter().take(SHOWN) {
+        let words: [(bool, &str, &str); 3] = [
+            (line.divides, "division", "나눗셈"),
+            (line.branches, "conditional jump", "조건 분기"),
+            (line.secret, "takes a secret", "비밀 값이 들어감"),
+        ];
+        let notes: Vec<&str> = words
+            .iter()
+            .filter(|(present, _, _)| *present)
+            .map(|(_, en, ko)| match lang {
+                Lang::En => *en,
+                Lang::Ko => *ko,
+            })
+            .collect();
+        writeln!(out, "    {}:{}  {}", line.path, line.line, notes.join(", "))?;
+    }
+    more(out, marked.len())?;
+    match (machine.assembly_blocks_without_line, lang) {
+        (0, _) => {}
+        (count, Lang::En) => writeln!(
+            out,
+            "  Blocks not matched to a line of this project: {count}"
+        )?,
+        (count, Lang::Ko) => writeln!(out, "  이 프로젝트의 줄과 맞추지 못한 블록 {count}개")?,
     }
     Ok(())
 }
@@ -842,6 +943,84 @@ mod tests {
         assert!(ko.contains("(파일 1개, 건너뜀 0개)"), "{ko}");
         assert!(ko.contains("치명적 1  높음 0"), "{ko}");
         assert!(ko.contains("[치명적] RLS가 꺼져 있어요"), "{ko}");
+    }
+
+    #[test]
+    fn summary_lists_what_the_machine_code_has_beyond_the_findings() {
+        let line = |line: u32, secret: bool| seethru_core::DivisionLine {
+            path: "src/lib.rs".to_owned(),
+            line,
+            secret,
+            assembly: false,
+        };
+        let block = |line: u32, branches: bool| seethru_core::AssemblyLine {
+            path: "src/arch.rs".to_owned(),
+            line,
+            divides: false,
+            branches,
+            secret: branches,
+        };
+        let mut report = one_finding_report();
+        report.target.machine_code = Some(seethru_core::MachineCode {
+            divisions: 7,
+            divisions_without_line: 2,
+            division_lines: vec![line(4, true), line(9, false)],
+            assembly_blocks: 5,
+            assembly_blocks_without_line: 1,
+            assembly_lines: vec![block(3, false), block(8, true)],
+        });
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::En).is_ok());
+        let en = String::from_utf8(out).unwrap_or_default();
+        for part in [
+            "In the machine code",
+            "Division instructions: 7. Lines of this project that have one: 2, of which findings: 1",
+            "Lines seethru did not tie to a secret:\n    src/lib.rs:9\n",
+            "Instructions not matched to a line of this project: 2",
+            "Hand-written assembly blocks: 5, on lines of this project: 2. Lines with a division or a conditional jump: 1",
+            "    src/arch.rs:8  conditional jump, takes a secret\n",
+            "Blocks not matched to a line of this project: 1",
+        ] {
+            assert!(en.contains(part), "{part}\n{en}");
+        }
+        assert!(
+            !en.contains("src/lib.rs:4\n") && !en.contains("src/arch.rs:3"),
+            "{en}"
+        );
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::Ko).is_ok());
+        let ko = String::from_utf8(out).unwrap_or_default();
+        assert!(ko.contains("기계어에서 본 것"), "{ko}");
+        assert!(
+            ko.contains("    src/arch.rs:8  조건 분기, 비밀 값이 들어감"),
+            "{ko}"
+        );
+        assert!(!summary(Lang::En).contains("machine code"));
+
+        let mut report = one_finding_report();
+        report.target.machine_code = Some(seethru_core::MachineCode {
+            divisions: 25,
+            division_lines: (1..=25).map(|at| line(at, false)).collect(),
+            ..seethru_core::MachineCode::default()
+        });
+        for (lang, rest) in [
+            (
+                Lang::En,
+                "    src/lib.rs:20\n    and 5 more in the report\n",
+            ),
+            (
+                Lang::Ko,
+                "    src/lib.rs:20\n    나머지 5줄은 리포트에 있어요\n",
+            ),
+        ] {
+            let mut out = Vec::new();
+            assert!(print_summary(&mut out, &report, lang).is_ok());
+            let text = String::from_utf8(out).unwrap_or_default();
+            assert!(
+                text.contains(rest) && !text.contains("src/lib.rs:21"),
+                "{text}"
+            );
+        }
     }
 
     #[test]
