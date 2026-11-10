@@ -45,7 +45,7 @@ All options, `seethru.toml`, finding IDs, exit codes, and the notes for each kin
 | Exposed secrets           | API keys and database URLs in code, build output and env files                                                       |
 | Firmware settings         | Test-only firmware settings left on, updates over plain HTTP and skipped certificate checks in ESP-IDF and Zephyr config files |
 | Open firmware update      | An HTTP route of an ESP-IDF device that writes a firmware update without checking who sends it                       |
-| Secret-dependent division | In compiled Rust code, a division of a value the code wipes after use, which leaks the value through timing          |
+| Secret-dependent division | In compiled Rust code, including hand-written assembly, a division of a value the code wipes after use, which leaks the value through timing |
 | Checks that can stop a program | In compiled Rust code of a kernel, firmware or FFI library, a check that panics on a value from an exported entry point |
 | Cargo dependencies        | Git and `*` dependencies that are not fixed to one version in a project with no `Cargo.lock`                         |
 | Removed memory wipes      | In a built Rust program, a line that clears memory in the source and has no code in the program. Needs `--tool`      |
