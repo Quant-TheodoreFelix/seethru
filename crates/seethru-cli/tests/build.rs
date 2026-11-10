@@ -203,3 +203,28 @@ fn reads_a_program_that_compiles_but_cannot_be_linked() -> std::io::Result<()> {
     assert_eq!(divisions(&built).len(), 1, "{messages}");
     Ok(())
 }
+
+#[test]
+fn finds_the_check_a_real_compiler_left_for_an_outside_value() -> std::io::Result<()> {
+    let dir = project("build-stops")?;
+    let source = dir.join("vault/src/lib.rs");
+    let mut text = fs::read_to_string(&source)?;
+    let first = text.lines().count() + 4;
+    text.push_str(
+        "\n#[unsafe(no_mangle)]\npub extern \"C\" fn pick(table: &[u32; 8], index: usize, guarded: usize) -> u32 {\n    let open = table[index];\n    let safe = if guarded < 8 { table[guarded] } else { 0 };\n    open.wrapping_add(safe)\n}\n",
+    );
+    fs::write(&source, text)?;
+    let built = scan(&dir, &["--build"])?;
+    let messages = String::from_utf8_lossy(&built.stderr).into_owned();
+    assert!(built.status.success(), "{messages}");
+    let report: serde_json::Value = serde_json::from_slice(&built.stdout).unwrap_or_default();
+    let lines: Vec<u64> = report["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|finding| finding["rule"] == "stop-on-outside-input")
+        .filter_map(|finding| finding["location"]["line"].as_u64())
+        .collect();
+    assert_eq!(lines, [first as u64], "{messages}");
+    Ok(())
+}
