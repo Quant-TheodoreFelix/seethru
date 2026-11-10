@@ -128,12 +128,13 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `firmware-ota-unguarded`               | High            | An HTTP route of the device writes a firmware update and no check of the caller was found                                    |
 | `secret-in-native-code`                | High            | A secret value is in C or C++ code or in a firmware config file                                                              |
 | `secret-dependent-division`            | Medium          | Compiled code divides a value that comes from memory the program wipes after use                                             |
+| `stop-on-outside-input`                | Low             | Compiled code keeps a check that panics, and the value it tests comes from an exported entry point such as a system call handler |
 | `cargo-dependency-not-pinned`          | Low             | A Cargo dependency from git has no `rev`, or its version is `*`, and the project has no `Cargo.lock`                         |
 
 ### Finding IDs
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
-- The ID of a `secret-dependent-division` finding names the file and the order of the finding in that file, such as `secret-dependent-division:file:mldsa/src/sign.rs:2`. It does not carry the line number.
+- The ID of a `secret-dependent-division` or `stop-on-outside-input` finding names the file and the order of the finding in that file, such as `secret-dependent-division:file:mldsa/src/sign.rs:2`. It does not carry the line number.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
 
 ### Accepted findings and errors
@@ -200,6 +201,8 @@ seethru scan . --llvm-ir target/release/deps
 - `--llvm-ir` takes a `.ll` file or a folder, which may be outside the project. For each `.ll` file, a `.s` file with the same name next to it is read as its machine code. Up to 1,024 files of 1 GB each, 2 GB in total. Reading that much can take a few gigabytes of memory.
 - **What counts as secret.** Memory that the code wipes with a volatile write on purpose, such as a call to `zeroize()`. Values read from that memory are followed through function calls, copies and returned pointers. Memory that a type wipes by itself when it is dropped does not count, because a hash state wipes itself even when it only held public data.
 - **What is reported.** A division or remainder of such a value (`secret-dependent-division`). The time a division takes depends on its operands on most processors. With a `.s` file, the finding is `likely` when the machine code has a division instruction for that source line, and it is dropped when the compiler turned a division by a constant into a multiplication. Without one it is `review`.
+- **Checks that can stop the program (`stop-on-outside-input`).** For kernels, firmware and libraries called from other languages. seethru treats the arguments of exported functions with unmangled names (`#[no_mangle]`, `extern "C"`), and the memory they point to, as values from outside. It reports a check that is still in the compiled code, panics when it fails and tests such a value: an index or slice range, an arithmetic overflow, `unwrap`, `expect`. A panic stops the program, and in a kernel it stops the whole system. The compiler already removed every check it could prove safe, so what is left is what it could not prove. An earlier check or a rule of your design may still make it impossible, which seethru cannot see, so these findings are always `review` and severity Low. Values that the outside value only selects, such as an entry of a kernel table picked by a caller's index, are not followed. Without such an entry point the report says the check did not run.
+- A volatile write to an address made from a number is a device register write and does not count as a wipe.
 - **What is not checked yet.** Branches and table lookups that depend on a secret, and whether a wipe survives the compiler. Both were tried and gave too many wrong results to ship. The report says so every time.
 - A secret that is only wiped by a caller outside the compiled files, or that sits behind a pointer stored in memory, is not followed. The output of a library is from before the final link. No finding does not mean constant time.
 - Paths in the compiled output must point into the scanned project, so build from the same checkout or use `--remap-path-prefix` to make them relative.

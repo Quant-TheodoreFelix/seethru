@@ -44,6 +44,7 @@ All options, `seethru.toml`, finding IDs, exit codes, and the notes for each kin
 | Firmware settings         | Test-only firmware settings left on, updates over plain HTTP and skipped certificate checks in ESP-IDF and Zephyr config files |
 | Open firmware update      | An HTTP route of an ESP-IDF device that writes a firmware update without checking who sends it                       |
 | Secret-dependent division | In compiled Rust code, a division of a value the code wipes after use, which leaks the value through timing          |
+| Checks that can stop a program | In compiled Rust code of a kernel, firmware or FFI library, a check that panics on a value from an exported entry point |
 | Cargo dependencies        | Git and `*` dependencies that are not fixed to one version in a project with no `Cargo.lock`                         |
 | Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked                         |
 
