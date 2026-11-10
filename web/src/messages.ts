@@ -1,5 +1,5 @@
 import type { Lang } from "./lang";
-import type { BucketVisibility, Confidence, EdgeKind, Exposure, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity, Zone } from "./model";
+import type { BucketVisibility, Confidence, EdgeKind, Exposure, NodeKind, PolicyCommand, ScanReport, SecretKind, Severity, Strength, Zone } from "./model";
 import type { Theme } from "./theme";
 
 export type ComponentLabel =
@@ -38,6 +38,10 @@ export interface Messages {
   viewOwnerRights: string;
   materialized: string;
   databaseFunction: string;
+  route: string;
+  serverAction: string;
+  codeCheck: string;
+  strength: Record<Strength, string>;
   rlsOn: string;
   rlsOff: string;
   policy: string;
@@ -147,6 +151,10 @@ const en: Messages = {
   viewOwnerRights: "uses the owner's permissions",
   materialized: "materialized",
   databaseFunction: "Database function",
+  route: "Route",
+  serverAction: "Server action",
+  codeCheck: "Code check",
+  strength: { verified: "verified", weak: "weak", unknown: "strength unknown" },
   rlsOn: "RLS on",
   rlsOff: "RLS off",
   policy: "Policy",
@@ -262,6 +270,10 @@ const ko: Messages = {
   viewOwnerRights: "만든 사람의 권한으로 동작",
   materialized: "저장형",
   databaseFunction: "DB 함수",
+  route: "경로",
+  serverAction: "server action",
+  codeCheck: "코드 확인",
+  strength: { verified: "검증됨", weak: "약함", unknown: "강도 모름" },
   rlsOn: "RLS 켜짐",
   rlsOff: "RLS 꺼짐",
   policy: "정책",
@@ -352,8 +364,15 @@ export function kindLabel(kind: NodeKind, m: Messages): string {
     case "component":
       return m.component[componentLabel(kind)];
     case "entryPoint": {
-      const base = kind.channel === "rpc" ? m.databaseFunction : m.entryPoint;
-      const exposure = kind.channel === "rpc" ? m.exposure[kind.exposure] : "";
+      const base =
+        kind.channel === "rpc"
+          ? m.databaseFunction
+          : kind.channel === "httpRoute"
+            ? m.route
+            : kind.channel === "serverAction"
+              ? m.serverAction
+              : m.entryPoint;
+      const exposure = kind.channel === "rpc" || kind.exposure !== "unknown" ? m.exposure[kind.exposure] : "";
       return exposure ? `${base} · ${exposure}` : base;
     }
     case "dataStore": {
@@ -367,7 +386,8 @@ export function kindLabel(kind: NodeKind, m: Messages): string {
       return rls === "enabled" ? `${m.table} · ${m.rlsOn}` : rls === "disabled" ? `${m.table} · ${m.rlsOff}` : kind.detail ? m.table : m.dataStore;
     }
     case "accessRule":
-      return kind.detail ? `${m.policy} · ${m.command[kind.detail.command]} · ${kind.detail.roles.join(", ")}` : m.accessRule;
+      if (kind.detail) return `${m.policy} · ${m.command[kind.detail.command]} · ${kind.detail.roles.join(", ")}`;
+      return kind.strength ? `${m.codeCheck} · ${m.strength[kind.strength]}` : m.accessRule;
     case "principal":
       return m.principal;
     case "credential":

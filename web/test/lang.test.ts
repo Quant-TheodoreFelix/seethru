@@ -76,7 +76,13 @@ test("labels graph nodes in the chosen language", () => {
   const rpc = { type: "entryPoint", channel: "rpc", exposure: "public" } as const;
   assert.equal(kindLabel(rpc, MESSAGES.en), "Database function · anyone can call");
   assert.equal(kindLabel(rpc, MESSAGES.ko), "DB 함수 · 누구나 호출");
-  assert.equal(kindLabel({ type: "entryPoint", channel: "httpRoute", exposure: "public" }, MESSAGES.en), "Entry point");
+  assert.equal(kindLabel({ type: "entryPoint", channel: "httpRoute", exposure: "public" }, MESSAGES.en), "Route · anyone can call");
+  assert.equal(kindLabel({ type: "entryPoint", channel: "httpRoute", exposure: "unknown" }, MESSAGES.en), "Route");
+  assert.equal(kindLabel({ type: "entryPoint", channel: "serverAction", exposure: "authenticated" }, MESSAGES.ko), "server action · 로그인한 사용자만");
+  assert.equal(kindLabel({ type: "entryPoint", channel: "cli", exposure: "unknown" }, MESSAGES.en), "Entry point");
+  const guard = { type: "accessRule", scope: "conditional", strength: "weak" } as const;
+  assert.equal(kindLabel(guard, MESSAGES.en), "Code check · weak");
+  assert.equal(kindLabel(guard, MESSAGES.ko), "코드 확인 · 약함");
   const component = (runtime: "browser" | "server" | "edge" | "unknown", artifact: "source" | "migration" | "config" | "buildOutput" | "other") =>
     kindLabel({ type: "component", runtime, artifact, unit: "file", basis: "path" }, MESSAGES.en);
   assert.equal(component("browser", "source"), "Browser code");
