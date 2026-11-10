@@ -27,6 +27,8 @@ Usage
 
 Commands
   scan     Analyze a project directory (default is the current directory)
+  own      Print the line a running app must serve before seethru checks it
+  mcp      Run as an MCP server for a coding agent
   schema   Print the JSON Schema of the scan report
 
 Options
