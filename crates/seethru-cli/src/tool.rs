@@ -660,7 +660,7 @@ pub(crate) fn collect(
         .into());
     }
     if binaries.is_empty() {
-        if built.is_some() && !permits.is_empty() {
+        if built.is_some() && permits.iter().any(|permit| permit.name.reads_binaries()) {
             out.problems.push(LimitationCode::BinaryNotFound);
         }
         return Ok(out);
