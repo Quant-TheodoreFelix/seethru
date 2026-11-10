@@ -961,6 +961,20 @@ pub(crate) fn ota_unguarded(entry: &str, more: usize) -> Text {
     }
 }
 
+pub(crate) fn stop_on_outside_input(file: &str, line: u32) -> Text {
+    let file = display_name(file);
+    Text {
+        title: LocalizedText {
+            en: format!("A value from outside can stop the program at line {line} of `{file}`"),
+            ko: format!("`{file}` {line}번째 줄에서 밖에서 온 값이 프로그램을 멈출 수 있어요"),
+        },
+        explanation: LocalizedText {
+            en: "The compiled code still has a check at this line that panics when it fails, and the value it tests comes from an exported entry point such as a system call handler or a function other programs call. A panic stops the program. In a kernel or firmware it stops the whole system, so one caller could halt everything. The compiler removes checks it can prove never fail, and this one stayed. Whether an earlier check already makes it impossible cannot be seen from the compiled code, so confirm that by reading the code. If it can fail, return an error for the bad value instead. If it cannot, accept this finding in `seethru.toml` with the reason.".to_owned(),
+            ko: "컴파일된 코드의 이 줄에 실패하면 panic하는 검사가 남아 있고, 그 검사가 보는 값이 시스템 콜 처리 함수나 다른 프로그램이 부르는 함수 같은 외부 진입점에서 들어와요. panic은 프로그램을 멈춰요. 커널이나 펌웨어에서는 시스템 전체가 멈추므로, 호출자 하나가 전체를 세울 수 있어요. 컴파일러는 절대 실패하지 않는다고 증명한 검사는 지우는데, 이 검사는 남았어요. 앞선 검사가 이미 막고 있는지는 컴파일된 코드만으로 알 수 없으니 코드를 읽어 확인하세요. 실패할 수 있다면 잘못된 값에 panic 대신 오류를 돌려주세요. 실패할 수 없다면 `seethru.toml`에 이유를 적고 이 탐지를 받아들이세요.".to_owned(),
+        },
+    }
+}
+
 pub(crate) fn secret_dependent_division(file: &str, line: u32, confirmed: bool) -> Text {
     let file = display_name(file);
     let (seen_en, seen_ko) = if confirmed {
@@ -1074,6 +1088,10 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "The compiled output has no memory wipe that is written as a call in the code, so nothing was treated as secret and nothing could be checked. This is normal when secrets are only wiped by their type on drop.",
             "컴파일 결과에 코드에 적힌 호출로 메모리를 지우는 곳이 없어서, 비밀로 본 값이 없고 확인한 것도 없어요. 비밀을 타입이 drop될 때만 지우는 코드에서는 이렇게 나와요.",
         ),
+        LimitationCode::OutsideEntriesNotFound => (
+            "The compiled output has no exported entry point that takes arguments, so values from outside were not followed and checks that can stop the program were not looked for. That check works for kernels, firmware and libraries called from other languages.",
+            "컴파일 결과에 인자를 받는 외부 진입점이 없어서, 밖에서 온 값을 따라가지 못했고 프로그램을 멈출 수 있는 검사도 찾지 않았어요. 이 검사는 커널, 펌웨어, 다른 언어에서 부르는 라이브러리에서 동작해요.",
+        ),
         LimitationCode::CompiledOutputPartlyRead => (
             "Part of the compiled output was left out because it was too large, could not be read, or points at files outside this project.",
             "컴파일 결과 중 일부는 너무 크거나 읽을 수 없거나 이 프로젝트 밖의 파일을 가리켜서 뺐어요.",
@@ -1141,6 +1159,7 @@ mod tests {
             super::external("gcc", "x", &[99_999], "main.c", 1),
             super::secret_dependent_division("vault/src/lib.rs", 12, true),
             super::secret_dependent_division("vault/src/lib.rs", 12, false),
+            super::stop_on_outside_input("kernel/src/main.rs", 40),
             super::cargo_dependency_not_pinned("helper", "Cargo.toml", true),
             super::cargo_dependency_not_pinned("helper", "app/Cargo.toml", false),
         ];

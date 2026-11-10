@@ -46,6 +46,13 @@ pub(crate) enum Op {
     Return {
         value: Option<Value>,
     },
+    Branch {
+        on: Value,
+        to: Vec<u32>,
+    },
+    Address {
+        operands: Vec<Value>,
+    },
     Other {
         operands: Vec<Value>,
     },
@@ -57,6 +64,7 @@ pub(crate) struct Instruction {
     pub op: Op,
     pub debug: Option<u32>,
     pub automatic: bool,
+    pub block: u32,
 }
 
 #[derive(Debug)]
@@ -66,6 +74,7 @@ pub(crate) struct Function {
     pub values: u32,
     pub body: Vec<Instruction>,
     pub unoptimized: bool,
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -327,6 +336,9 @@ fn unquote(name: &str) -> &str {
 pub(crate) fn parse(text: &str) -> Module {
     let mut module = Module::default();
     let mut current: Option<(Function, Names<'_>, Option<u32>)> = None;
+    let mut blocks: HashMap<&str, u32> = HashMap::new();
+    let mut block = 0u32;
+    let mut switching = false;
     let mut attribute_of: Vec<Option<u32>> = Vec::new();
     let mut unoptimized: HashMap<u32, bool> = HashMap::new();
 
@@ -349,9 +361,29 @@ pub(crate) fn parse(text: &str) -> Module {
                 module.truncated = true;
                 continue;
             }
-            if line.starts_with([' ', '\t'])
-                && let Some(instruction) = instruction(line, names)
-            {
+            if !line.starts_with([' ', '\t']) {
+                if let Some(label) = block_label(line) {
+                    block = block_id(&mut blocks, label);
+                }
+                continue;
+            }
+            if switching {
+                switching = !line.trim_start().starts_with(']');
+                if let Some(Instruction {
+                    op: Op::Branch { to, .. },
+                    ..
+                }) = function.body.last_mut()
+                {
+                    to.extend(targets(line, &mut blocks));
+                }
+                continue;
+            }
+            if let Some(mut instruction) = instruction(line, names) {
+                if let Op::Branch { to, .. } = &mut instruction.op {
+                    to.extend(targets(line, &mut blocks));
+                    switching = line.trim_end().ends_with('[');
+                }
+                instruction.block = block;
                 function.body.push(instruction);
             }
             continue;
@@ -362,6 +394,9 @@ pub(crate) fn parse(text: &str) -> Module {
                 continue;
             }
             current = header(line);
+            blocks.clear();
+            block = block_id(&mut blocks, "");
+            switching = false;
         } else if line.starts_with('!') {
             if module.places.len() + module.scopes.len() + module.files.len() >= MAX_METADATA {
                 module.truncated = true;
@@ -388,6 +423,70 @@ pub(crate) fn parse(text: &str) -> Module {
     }
     module.functions = functions;
     module
+}
+
+fn block_label(line: &str) -> Option<&str> {
+    let (name, rest) = line.split_once(':')?;
+    let rest = rest.trim_start();
+    if name.is_empty() || name.starts_with(';') || !(rest.is_empty() || rest.starts_with(';')) {
+        return None;
+    }
+    Some(name)
+}
+
+fn block_id<'a>(blocks: &mut HashMap<&'a str, u32>, name: &'a str) -> u32 {
+    let next = u32::try_from(blocks.len()).unwrap_or(u32::MAX);
+    *blocks.entry(name).or_insert(next)
+}
+
+fn targets<'a>(line: &'a str, blocks: &mut HashMap<&'a str, u32>) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut tail = line;
+    while let Some(at) = tail.find("label %") {
+        let rest = tail.get(at + "label %".len()..).unwrap_or_default();
+        let end = rest
+            .find(|c: char| c == ',' || c.is_ascii_whitespace())
+            .unwrap_or(rest.len());
+        let name = rest.get(..end).unwrap_or_default();
+        out.push(block_id(blocks, name));
+        tail = rest.get(end..).unwrap_or_default();
+    }
+    out
+}
+
+fn is_exported(line: &str, symbol: &str) -> bool {
+    let linkage = line.split('@').next().unwrap_or_default();
+    let hidden = [
+        "internal",
+        "private",
+        "linkonce",
+        "weak",
+        "available_externally",
+    ];
+    let mangled = symbol.starts_with("_ZN") || symbol.starts_with("_R");
+    let runtime = symbol == "main"
+        || symbol.starts_with("__")
+        || symbol.starts_with("rust_")
+        || symbol.contains('.');
+    !mangled
+        && !runtime
+        && !linkage
+            .split_ascii_whitespace()
+            .any(|word| hidden.iter().any(|kind| word.starts_with(kind)))
+}
+
+pub(crate) fn is_panic(symbol: &str) -> bool {
+    let library = ["4core", "5alloc", "3std"]
+        .iter()
+        .any(|part| symbol.contains(part));
+    let stops = [
+        "panicking",
+        "_fail17h",
+        "_failed17h",
+        "panic_already",
+        "handle_alloc_error",
+    ];
+    library && stops.iter().any(|part| symbol.contains(part))
 }
 
 fn is_drop(name: &str) -> bool {
@@ -420,6 +519,7 @@ fn header(line: &str) -> Option<(Function, Names<'_>, Option<u32>)> {
             values: 0,
             body: Vec::new(),
             unoptimized: false,
+            exported: is_exported(line, symbol),
         },
         names,
         attribute,
@@ -526,7 +626,19 @@ fn instruction<'a>(line: &'a str, names: &mut Names<'a>) -> Option<Instruction> 
         "ret" => Op::Return {
             value: names.last(rest),
         },
-        "br" | "switch" | "unreachable" | "resume" | "indirectbr" => return None,
+        "br" | "switch" => {
+            let first = split_top(rest).into_iter().next().unwrap_or_default();
+            match names.last(first) {
+                Some(on) if !first.trim_start().starts_with("label ") => {
+                    Op::Branch { on, to: Vec::new() }
+                }
+                _ => return None,
+            }
+        }
+        "unreachable" | "resume" | "indirectbr" => return None,
+        "inttoptr" => Op::Address {
+            operands: names.locals(rest),
+        },
         "extractvalue" | "freeze" | "bitcast" | "addrspacecast" => Op::Alias {
             of: names.locals(rest),
         },
@@ -546,6 +658,7 @@ fn instruction<'a>(line: &'a str, names: &mut Names<'a>) -> Option<Instruction> 
         op,
         debug,
         automatic: false,
+        block: 0,
     })
 }
 

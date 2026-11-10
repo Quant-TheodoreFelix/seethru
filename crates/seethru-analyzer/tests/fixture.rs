@@ -123,7 +123,7 @@ fn supabase_vite_fixture_reports_expected_findings() {
         "env:SUPABASE_SERVICE_ROLE_KEY",
         EdgeKind::UsesConfig
     ));
-    assert_eq!(report.schema_version, 9);
+    assert_eq!(report.schema_version, 10);
     assert_eq!(
         report.target.ecosystems,
         vec![

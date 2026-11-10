@@ -153,7 +153,13 @@ fn fixture_reports_the_division_of_a_wiped_value_and_not_the_public_one() {
         functions: 4,
         machine_code: true,
     }));
-    assert_eq!(codes(&report), [LimitationCode::CompiledChecksPartial]);
+    assert_eq!(
+        codes(&report),
+        [
+            LimitationCode::CompiledChecksPartial,
+            LimitationCode::OutsideEntriesNotFound
+        ]
+    );
     let package = report.nodes.iter().find(|node| {
         matches!(
             node.kind,
@@ -378,4 +384,148 @@ fn a_project_seethru_does_not_recognize_says_so() {
     assert!(result.is_ok(), "{result:?}");
     let Ok(report) = result else { return };
     assert_eq!(codes(&report), [LimitationCode::ProjectKindNotRecognized]);
+}
+
+const KERNEL: &str = r#"
+@TABLE = internal global [4 x i64] zeroinitializer
+
+define dso_local void @handle_call(ptr noundef %ctx) !dbg !4 {
+start:
+  %number = load i64, ptr %ctx, align 8, !dbg !10
+  switch i64 %number, label %other [
+    i64 1, label %first
+    i64 2, label %second
+  ], !dbg !10
+
+first:                                            ; preds = %start
+  %slot.ptr = getelementptr inbounds i8, ptr %ctx, i64 8, !dbg !11
+  %slot = load i64, ptr %slot.ptr, align 8, !dbg !11
+  %inside = icmp ult i64 %slot, 4, !dbg !12
+  br i1 %inside, label %read, label %panic, !dbg !12
+
+read:                                             ; preds = %first
+  %entry = getelementptr inbounds [4 x i64], ptr @TABLE, i64 0, i64 %slot, !dbg !12
+  %held = load i64, ptr %entry, align 8, !dbg !12
+  %sum = add i64 %held, 1, !dbg !13
+  %wrapped = icmp eq i64 %sum, 0, !dbg !13
+  br i1 %wrapped, label %panic.kept, label %other, !dbg !13
+
+second:                                           ; preds = %start
+  %value = getelementptr inbounds i8, ptr %ctx, i64 16, !dbg !14
+  call fastcc void @_ZN4unit6helper17h0123456789abcdefE(ptr %value), !dbg !14
+  store volatile i32 1, ptr inttoptr (i64 4096 to ptr), align 4, !dbg !14
+  br label %other, !dbg !14
+
+other:                                            ; preds = %second, %read, %start
+  ret void, !dbg !15
+
+panic:                                            ; preds = %first
+  call void @_ZN4core9panicking18panic_bounds_check17h0123456789abcdefE(i64 %slot, i64 4), !dbg !12
+  unreachable, !dbg !12
+
+panic.kept:                                       ; preds = %read
+  call void @_ZN4core9panicking11panic_const24panic_const_add_overflow17h0123456789abcdefE(), !dbg !13
+  unreachable, !dbg !13
+}
+
+define internal fastcc void @_ZN4unit6helper17h0123456789abcdefE(ptr %value) !dbg !5 {
+start:
+  %length = load i64, ptr %value, align 8, !dbg !16
+  %fits = icmp ult i64 %length, 64, !dbg !17
+  br i1 %fits, label %done, label %panic, !dbg !17
+
+done:                                             ; preds = %start
+  ret void, !dbg !18
+
+panic:                                            ; preds = %start
+  call void @_ZN4core5slice5index24slice_end_index_len_fail17h0123456789abcdefE(i64 %length, i64 64), !dbg !17
+  unreachable, !dbg !17
+}
+
+define void @_ZN4unit6public17h0123456789abcdefE(i64 %index) !dbg !6 {
+start:
+  %inside = icmp ult i64 %index, 4, !dbg !19
+  br i1 %inside, label %done, label %panic, !dbg !19
+
+done:                                             ; preds = %start
+  ret void, !dbg !19
+
+panic:                                            ; preds = %start
+  call void @_ZN4core9panicking18panic_bounds_check17h0123456789abcdefE(i64 %index, i64 4), !dbg !19
+  unreachable, !dbg !19
+}
+
+!1 = !DIFile(filename: "src/lib.rs", directory: "")
+!4 = distinct !DISubprogram(name: "handle_call", file: !1, line: 1)
+!5 = distinct !DISubprogram(name: "helper", file: !1, line: 20)
+!6 = distinct !DISubprogram(name: "public", file: !1, line: 26)
+!10 = !DILocation(line: 2, column: 5, scope: !4)
+!11 = !DILocation(line: 4, column: 5, scope: !4)
+!12 = !DILocation(line: 5, column: 5, scope: !4)
+!13 = !DILocation(line: 6, column: 5, scope: !4)
+!14 = !DILocation(line: 9, column: 5, scope: !4)
+!15 = !DILocation(line: 11, column: 5, scope: !4)
+!16 = !DILocation(line: 21, column: 5, scope: !5)
+!17 = !DILocation(line: 22, column: 5, scope: !5)
+!18 = !DILocation(line: 23, column: 5, scope: !5)
+!19 = !DILocation(line: 27, column: 5, scope: !6)
+"#;
+
+fn stops(report: &ScanReport) -> Vec<(String, u32)> {
+    report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule == RuleId::StopOnOutsideInput)
+        .filter_map(|finding| {
+            let location = finding.location.as_ref()?;
+            Some((location.path.clone(), location.line))
+        })
+        .collect()
+}
+
+#[test]
+fn reports_checks_that_panic_on_a_value_from_an_exported_entry() {
+    let project = project("compiled-stops");
+    project.write("out/unit.ll", KERNEL);
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+
+    assert_eq!(
+        stops(&report),
+        [("src/lib.rs".to_owned(), 5), ("src/lib.rs".to_owned(), 22)]
+    );
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.rule == RuleId::StopOnOutsideInput);
+    assert!(finding.is_some());
+    let Some(finding) = finding else { return };
+    assert_eq!(finding.id, "stop-on-outside-input:file:src/lib.rs:1");
+    assert_eq!(finding.severity, Severity::Low);
+    assert_eq!(finding.confidence, Confidence::Review);
+    assert_eq!(finding.cwe, [248]);
+
+    let codes = codes(&report);
+    assert!(!codes.contains(&LimitationCode::OutsideEntriesNotFound));
+    assert!(codes.contains(&LimitationCode::CompiledOutputWithoutWipes));
+}
+
+#[test]
+fn says_so_when_no_exported_entry_takes_outside_values() {
+    let project = project("compiled-no-entry");
+    project.write(
+        "out/unit.ll",
+        &KERNEL.replace(
+            "define dso_local void @handle_call",
+            "define internal void @handle_call",
+        ),
+    );
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+    assert!(stops(&report).is_empty());
+    assert!(codes(&report).contains(&LimitationCode::OutsideEntriesNotFound));
 }

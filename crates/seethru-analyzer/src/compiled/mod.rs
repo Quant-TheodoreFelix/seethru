@@ -34,9 +34,18 @@ pub(crate) struct Division {
     pub confirmed: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Stop {
+    pub path: String,
+    pub line: u32,
+    pub callers: Vec<(String, u32)>,
+}
+
 pub(crate) struct Compiled {
     pub inputs: Vec<Input>,
     pub divisions: Vec<Division>,
+    pub stops: Vec<Stop>,
+    pub entries: usize,
     pub machine_code: bool,
     pub unoptimized: bool,
     pub partial: bool,
@@ -169,6 +178,32 @@ pub(crate) fn read(
         entry.by_variable |= site.by_variable;
         entry.confirmed |= confirmed == Some(true);
     }
+    let mut halted: BTreeMap<(String, u32), Stop> = BTreeMap::new();
+    for site in &flow.stops {
+        let frames = modules[site.module].frames(site.debug);
+        let mut inside: Vec<(String, u32)> = frames
+            .iter()
+            .filter(|frame| frame.line > 0)
+            .filter_map(|frame| Some((place(&frame.path)?, frame.line)))
+            .collect();
+        inside.dedup();
+        if inside.is_empty() {
+            continue;
+        }
+        let (path, line) = inside.remove(0);
+        inside.truncate(MAX_STEPS - 1);
+        inside.reverse();
+        halted.entry((path.clone(), line)).or_insert(Stop {
+            path,
+            line,
+            callers: inside,
+        });
+    }
+    let mut stops: Vec<Stop> = halted.into_values().collect();
+    if stops.len() > MAX_FINDINGS {
+        stops.truncate(MAX_FINDINGS);
+        partial = true;
+    }
     let mut divisions: Vec<Division> = merged.into_values().collect();
     if divisions.len() > MAX_FINDINGS {
         divisions.truncate(MAX_FINDINGS);
@@ -179,6 +214,8 @@ pub(crate) fn read(
         unoptimized: total > 0 && slow * 2 > total,
         inputs,
         divisions,
+        stops,
+        entries: flow.entries,
         partial,
         wipes: flow.wipes,
     })
@@ -189,6 +226,57 @@ pub(crate) fn emit(
     graph: &mut Graph,
     package_of: &dyn Fn(&str) -> Option<NodeId>,
 ) {
+    let mut orders: BTreeMap<&str, u32> = BTreeMap::new();
+    for stop in &compiled.stops {
+        let node = graph.add_file(&stop.path, FileRole::NativeCode, Basis::Path);
+        if let Some(package) = package_of(&stop.path) {
+            graph.add_edge(package, node.clone(), EdgeKind::Contains);
+        }
+        let location = Location {
+            path: stop.path.clone(),
+            line: stop.line,
+            column: 1,
+        };
+        let mut evidence = Vec::new();
+        for (path, line) in &stop.callers {
+            let caller = graph.add_file(path, FileRole::NativeCode, Basis::Path);
+            if let Some(package) = package_of(path) {
+                graph.add_edge(package, caller, EdgeKind::Contains);
+            }
+            let via = (!evidence.is_empty()).then_some(EdgeKind::Calls);
+            evidence.push(file_step(
+                path,
+                via,
+                Location {
+                    path: path.clone(),
+                    line: *line,
+                    column: 1,
+                },
+            ));
+        }
+        let via = (!evidence.is_empty()).then_some(EdgeKind::Calls);
+        evidence.push(file_step(&stop.path, via, location.clone()));
+        let text = rules::stop_on_outside_input(&stop.path, stop.line);
+        let rule = RuleId::StopOnOutsideInput;
+        let order = orders.entry(stop.path.as_str()).or_insert(0u32);
+        *order += 1;
+        graph.add_external(Finding {
+            id: format!("{}:{}:{order}", rule.as_str(), file_id(&stop.path)),
+            rule,
+            severity: Severity::Low,
+            confidence: Confidence::Review,
+            title: text.title,
+            explanation: text.explanation,
+            node,
+            location: Some(location),
+            evidence,
+            origin: Origin::seethru_with_compiled_output(),
+            cwe: rule.cwe().to_vec(),
+            proof: None,
+            fix_prompt: None,
+            accepted: None,
+        });
+    }
     let mut orders: BTreeMap<&str, u32> = BTreeMap::new();
     for division in &compiled.divisions {
         let node = graph.add_file(&division.path, FileRole::NativeCode, Basis::Path);

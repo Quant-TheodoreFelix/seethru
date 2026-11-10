@@ -590,7 +590,8 @@
         "compiledOutputWithoutMachineCode",
         "compiledOutputNotOptimized",
         "compiledOutputPartlyRead",
-        "compiledOutputWithoutWipes"
+        "compiledOutputWithoutWipes",
+        "outsideEntriesNotFound"
       ],
       "type": "string"
     },
@@ -911,7 +912,8 @@
         "firmware-ota-unguarded",
         "secret-in-native-code",
         "secret-dependent-division",
-        "cargo-dependency-not-pinned"
+        "cargo-dependency-not-pinned",
+        "stop-on-outside-input"
       ],
       "type": "string"
     },

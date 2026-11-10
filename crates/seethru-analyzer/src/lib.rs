@@ -441,6 +441,9 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
                     LimitationCode::CompiledOutputWithoutWipes,
                 ));
             }
+            if compiled.entries == 0 {
+                limitations.push(rules::limitation(LimitationCode::OutsideEntriesNotFound));
+            }
             if compiled.partial {
                 limitations.push(rules::limitation(LimitationCode::CompiledOutputPartlyRead));
             }

@@ -258,6 +258,10 @@ fn rule_text(rule: RuleId, lang: Lang) -> &'static str {
             "Compiled code divides a value that comes from memory the program wipes after use, so the time it takes can reveal a secret.",
             "컴파일된 코드가 프로그램이 쓰고 나서 지우는 메모리에서 나온 값을 나눠서, 걸리는 시간으로 비밀이 드러날 수 있어요.",
         ),
+        RuleId::StopOnOutsideInput => (
+            "Compiled code keeps a check that panics, and the value it tests comes from an exported entry point, so a caller may be able to stop the program.",
+            "컴파일된 코드에 panic하는 검사가 남아 있고 그 값이 외부 진입점에서 들어와서, 호출자가 프로그램을 멈출 수 있어요.",
+        ),
         RuleId::CargoDependencyNotPinned => (
             "A Cargo dependency is not fixed to one version and the project has no Cargo.lock.",
             "Cargo 의존성이 한 버전으로 고정돼 있지 않고 프로젝트에 Cargo.lock이 없어요.",

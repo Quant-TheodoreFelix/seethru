@@ -1,14 +1,31 @@
 use std::collections::{BTreeSet, HashMap};
 
-use super::ir::{Callee, Function, Module, Op, Value};
+use super::ir::{Callee, Function, Module, Op, Value, is_panic};
 
 const MAX_ROUNDS: usize = 64;
 const MAX_LOCAL_ROUNDS: usize = 64;
-const MAX_LABELLED_PARAMS: usize = 63;
+const MAX_LABELLED_PARAMS: usize = 31;
 
 type Labels = u128;
 
 const WIPED: Labels = 1;
+const ANY: Labels = u64::MAX as Labels;
+const DIRECT: Labels = !ANY;
+
+fn direct(labels: Labels) -> Labels {
+    (labels & ANY & !WIPED) << 64
+}
+
+fn through(labels: Labels, given: Labels) -> Labels {
+    let mut out = 0;
+    if labels & ANY != 0 {
+        out |= given & ANY;
+    }
+    if labels & DIRECT != 0 {
+        out |= given & DIRECT;
+    }
+    out
+}
 
 fn value_label(param: usize) -> Labels {
     if param < MAX_LABELLED_PARAMS {
@@ -33,8 +50,16 @@ pub(crate) struct Site {
     pub by_variable: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Stop {
+    pub module: usize,
+    pub debug: u32,
+}
+
 pub(crate) struct Flow {
     pub sites: Vec<Site>,
+    pub stops: Vec<Stop>,
+    pub entries: usize,
     pub wipes: usize,
     pub truncated: bool,
 }
@@ -46,6 +71,7 @@ struct Summary {
     wipes: Vec<bool>,
     reads: Vec<bool>,
     secret: Labels,
+    outside: Labels,
 }
 
 struct Local {
@@ -54,16 +80,29 @@ struct Local {
     memory: Vec<Labels>,
     wiped: Vec<bool>,
     read: Vec<bool>,
+    address: Vec<bool>,
 }
 
 impl Local {
+    fn is_device(&self, pointer: Value) -> bool {
+        self.roots(pointer)
+            .into_iter()
+            .any(|root| self.address.get(root as usize).copied().unwrap_or(false))
+    }
+
     fn new(function: &Function) -> Self {
         let size = function.values as usize;
         let mut bases = vec![Vec::new(); size];
+        let mut address = vec![false; size];
         for instruction in &function.body {
             let Some(result) = instruction.result else {
                 continue;
             };
+            if matches!(instruction.op, Op::Address { .. })
+                && let Some(slot) = address.get_mut(result as usize)
+            {
+                *slot = true;
+            }
             let Some(slot) = bases.get_mut(result as usize) else {
                 continue;
             };
@@ -86,11 +125,14 @@ impl Local {
             memory: vec![0; size],
             wiped: vec![false; size],
             read: vec![false; size],
+            address,
         };
         for (position, param) in function.params.iter().enumerate() {
             if let Some(param) = param {
-                local.add_value(*param, value_label(position));
-                local.add_memory(*param, pointee_label(position), false);
+                let value = value_label(position);
+                let pointee = pointee_label(position);
+                local.add_value(*param, value | direct(value));
+                local.add_memory(*param, pointee | direct(pointee), false);
             }
         }
         local
@@ -173,12 +215,10 @@ impl Local {
         let mut out = labels & WIPED;
         for (position, arg) in args.iter().enumerate().take(MAX_LABELLED_PARAMS) {
             let Some(arg) = arg else { continue };
-            if labels & value_label(position) != 0 {
-                out |= self.of(*arg);
-            }
-            if labels & pointee_label(position) != 0 {
-                out |= self.held(*arg);
-            }
+            let value = value_label(position);
+            let pointee = pointee_label(position);
+            out |= through(labels & (value | direct(value)), self.of(*arg));
+            out |= through(labels & (pointee | direct(pointee)), self.held(*arg));
         }
         out
     }
@@ -197,7 +237,7 @@ impl Local {
                 Op::Load { ptr } => match ptr {
                     Some(ptr) => {
                         moved |= self.mark_read(*ptr);
-                        self.of(*ptr) | self.held(*ptr)
+                        (self.of(*ptr) & ANY) | self.held(*ptr)
                     }
                     None => 0,
                 },
@@ -209,7 +249,7 @@ impl Local {
                     if let Some(ptr) = ptr {
                         let stored = value.map_or(0, |value| self.of(value));
                         if *volatile {
-                            if !instruction.automatic {
+                            if !instruction.automatic && !self.is_device(*ptr) {
                                 moved |= self.add_memory(*ptr, WIPED, true);
                             }
                         } else if stored != 0 {
@@ -222,7 +262,10 @@ impl Local {
                 Op::Offset { base, indexes } => {
                     base.map_or(0, |base| self.of(base)) | self.of_all(indexes)
                 }
-                Op::Divide { operands, .. } | Op::Other { operands } => self.of_all(operands),
+                Op::Divide { operands, .. } | Op::Other { operands } | Op::Address { operands } => {
+                    self.of_all(operands)
+                }
+                Op::Branch { .. } => 0,
                 Op::Return { value } => {
                     *returns |= value.map_or(0, |value| self.of(value));
                     0
@@ -301,6 +344,15 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
         }
     }
     let mut summaries = vec![Summary::default(); functions.len()];
+    let mut entries = 0usize;
+    for (summary, (_, function)) in summaries.iter_mut().zip(&functions) {
+        if function.exported && function.params.iter().any(Option::is_some) {
+            entries += 1;
+            for position in 0..function.params.len() {
+                summary.outside |= direct(value_label(position) | pointee_label(position));
+            }
+        }
+    }
     let mut locals: Vec<Local> = functions
         .iter()
         .map(|(_, function)| Local::new(function))
@@ -346,7 +398,8 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
                 .collect();
             let returns = returns & !WIPED;
             let secret = summaries[at].secret | WIPED;
-            let mut requests: Vec<(usize, Labels)> = Vec::new();
+            let outside = summaries[at].outside;
+            let mut requests: Vec<(usize, Labels, Labels)> = Vec::new();
             for instruction in &function.body {
                 let Op::Call {
                     callee: Callee::Function(name),
@@ -360,17 +413,26 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
                     continue;
                 };
                 let mut passed = 0;
+                let mut given = 0;
                 for (position, arg) in args.iter().enumerate() {
                     let Some(arg) = arg else { continue };
-                    if local.of(*arg) & secret != 0 {
+                    let value = local.of(*arg);
+                    let held = local.held(*arg);
+                    if value & secret != 0 {
                         passed |= value_label(position);
                     }
-                    if local.held(*arg) & secret != 0 {
+                    if held & secret != 0 {
                         passed |= pointee_label(position);
                     }
+                    if value & outside != 0 {
+                        given |= direct(value_label(position));
+                    }
+                    if held & outside != 0 {
+                        given |= direct(pointee_label(position));
+                    }
                 }
-                if passed != 0 {
-                    requests.push((callee_at, passed));
+                if passed != 0 || given != 0 {
+                    requests.push((callee_at, passed, given));
                 }
             }
             let summary = &mut summaries[at];
@@ -385,10 +447,14 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
                 summary.reads = reads;
                 changed = true;
             }
-            for (callee_at, passed) in requests {
+            for (callee_at, passed, given) in requests {
                 let callee = &mut summaries[callee_at];
                 if callee.secret | passed != callee.secret {
                     callee.secret |= passed;
+                    changed = true;
+                }
+                if callee.outside | given != callee.outside {
+                    callee.outside |= given;
                     changed = true;
                 }
             }
@@ -400,14 +466,48 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
     }
 
     let mut sites = Vec::new();
+    let mut stops = Vec::new();
     let mut wipes = 0usize;
     for (at, (module_at, function)) in functions.iter().enumerate() {
         let local = &locals[at];
         let secret = summaries[at].secret | WIPED;
+        let outside = summaries[at].outside;
+        let mut panics: HashMap<u32, u32> = HashMap::new();
+        if outside != 0 {
+            for instruction in &function.body {
+                if let Op::Call {
+                    callee: Callee::Function(name),
+                    ..
+                } = &instruction.op
+                    && is_panic(name)
+                    && let Some(debug) = instruction.debug
+                {
+                    panics.entry(instruction.block).or_insert(debug);
+                }
+            }
+        }
         for instruction in &function.body {
-            if matches!(instruction.op, Op::Store { volatile: true, .. }) && !instruction.automatic
+            if let Op::Store {
+                volatile: true,
+                ptr: Some(ptr),
+                ..
+            } = &instruction.op
+                && !instruction.automatic
+                && !local.is_device(*ptr)
             {
                 wipes += 1;
+            }
+            if let Op::Branch { on, to } = &instruction.op
+                && local.of(*on) & outside != 0
+            {
+                for block in to {
+                    if let Some(debug) = panics.get(block) {
+                        stops.push(Stop {
+                            module: *module_at,
+                            debug: *debug,
+                        });
+                    }
+                }
             }
             if let Op::Divide {
                 operands,
@@ -426,8 +526,12 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
     }
     sites.sort();
     sites.dedup();
+    stops.sort();
+    stops.dedup();
     Flow {
         sites,
+        stops,
+        entries,
         wipes,
         truncated,
     }

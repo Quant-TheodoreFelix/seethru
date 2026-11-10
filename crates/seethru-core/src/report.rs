@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -137,6 +137,7 @@ pub enum LimitationCode {
     CompiledOutputNotOptimized,
     CompiledOutputPartlyRead,
     CompiledOutputWithoutWipes,
+    OutsideEntriesNotFound,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -591,6 +592,7 @@ pub enum RuleId {
     SecretInNativeCode,
     SecretDependentDivision,
     CargoDependencyNotPinned,
+    StopOnOutsideInput,
 }
 
 impl RuleId {
@@ -615,6 +617,7 @@ impl RuleId {
             Self::SecretInNativeCode => "secret-in-native-code",
             Self::SecretDependentDivision => "secret-dependent-division",
             Self::CargoDependencyNotPinned => "cargo-dependency-not-pinned",
+            Self::StopOnOutsideInput => "stop-on-outside-input",
         }
     }
 
@@ -634,6 +637,7 @@ impl RuleId {
             Self::FirmwareOtaUnguarded => &[306, 494],
             Self::SecretDependentDivision => &[208],
             Self::CargoDependencyNotPinned => &[829],
+            Self::StopOnOutsideInput => &[248],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing | Self::External => &[],
         }
