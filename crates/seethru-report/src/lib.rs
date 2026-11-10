@@ -2,9 +2,13 @@ mod assets {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
+mod sarif;
+
 use std::fmt;
 
 use seethru_core::{Lang, ScanReport};
+
+pub use sarif::render_sarif;
 
 pub const DATA_ELEMENT_ID: &str = "seethru-report";
 

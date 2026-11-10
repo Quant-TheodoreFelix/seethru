@@ -775,6 +775,7 @@ name = "seethru-report"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "seethru-analyzer",
  "seethru-core",
  "serde_json",
  "sha2",

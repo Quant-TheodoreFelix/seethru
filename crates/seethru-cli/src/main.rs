@@ -11,7 +11,7 @@ seethru - see through your app before attackers do
 
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
-               [--build-output DIR] [--sarif FILE]...
+               [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
   seethru schema
   seethru --version
 
@@ -29,6 +29,8 @@ Options
                project. seethru never runs the build itself
   --sarif FILE Add the results an outside scanner wrote to FILE in SARIF 2.1.0.
                Can be given up to 8 times. seethru never runs the scanner
+  --sarif-out FILE
+               Also write what seethru found to FILE in SARIF 2.1.0
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -43,6 +45,7 @@ enum Command {
         read_config: bool,
         build_output: Option<PathBuf>,
         sarif: Vec<PathBuf>,
+        sarif_out: Option<PathBuf>,
     },
     Schema,
     Version,
@@ -71,11 +74,13 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut read_config = true;
             let mut build_output = None;
             let mut sarif = Vec::new();
+            let mut sarif_out: Option<PathBuf> = None;
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
                     Long("build-output") => build_output = Some(PathBuf::from(parser.value()?)),
                     Long("sarif") => sarif.push(PathBuf::from(parser.value()?)),
+                    Long("sarif-out") => sarif_out = Some(PathBuf::from(parser.value()?)),
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -96,6 +101,14 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     "--json and --out cannot be used together".into(),
                 ));
             }
+            if sarif_out
+                .as_ref()
+                .is_some_and(|target| sarif.contains(target) || out.as_ref() == Some(target))
+            {
+                return Err(lexopt::Error::Custom(
+                    "--sarif-out must be a different file from --sarif and --out".into(),
+                ));
+            }
             Ok(Command::Scan {
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
                 out,
@@ -104,6 +117,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 read_config,
                 build_output,
                 sarif,
+                sarif_out,
             })
         }
         "schema" => match parser.next()? {
@@ -162,6 +176,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             read_config,
             build_output,
             sarif,
+            sarif_out,
         } => {
             let options = seethru_analyzer::ScanOptions {
                 read_config,
@@ -170,6 +185,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
+            if let Some(target) = &sarif_out {
+                let sarif = seethru_report::render_sarif(&report, lang)?;
+                write_report(target, &sarif)?;
+            }
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
                 writeln!(stdout)?;
@@ -401,7 +420,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif }) if path.as_os_str() == "." && sarif.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None }) if path.as_os_str() == "." && sarif.is_empty()
         ));
     }
 
@@ -592,12 +611,24 @@ mod tests {
     }
 
     #[test]
-    fn scan_accepts_sarif_files() {
+    fn scan_accepts_sarif_files_in_and_out() {
         assert!(matches!(
-            parse(args(&["scan", "app", "--sarif", "a.sarif", "--sarif=b.sarif"])),
-            Ok(Command::Scan { ref sarif, .. }) if sarif.len() == 2
+            parse(args(&["scan", "app", "--sarif", "a.sarif", "--sarif=b.sarif", "--sarif-out", "o.sarif"])),
+            Ok(Command::Scan { ref sarif, sarif_out: Some(ref target), .. })
+                if sarif.len() == 2 && target.as_os_str() == "o.sarif"
         ));
         assert!(parse(args(&["scan", "--sarif"])).is_err());
+        assert!(
+            parse(args(&[
+                "scan",
+                "--sarif",
+                "a.sarif",
+                "--sarif-out",
+                "a.sarif"
+            ]))
+            .is_err()
+        );
+        assert!(parse(args(&["scan", "--out", "r.html", "--sarif-out", "r.html"])).is_err());
     }
 
     #[test]
