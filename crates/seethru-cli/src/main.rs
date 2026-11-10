@@ -1,4 +1,6 @@
 mod build;
+mod mcp;
+mod tool;
 
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -15,6 +17,8 @@ Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
                [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
                [--compile-commands FILE] [--llvm-ir PATH]... [--build]
+               [--binary FILE]... [--tool NAME[=PATH]]...
+  seethru mcp [--root DIR]... [--allow-build] [--tool NAME[=PATH]]...
   seethru schema
   seethru --version
 
@@ -46,11 +50,33 @@ Options
                This runs the project's build scripts and macros on this
                computer, so use it only on code you trust. Nothing is
                downloaded. The output goes to PATH/.seethru/build
+  --binary FILE
+               A linked program (ELF or Mach-O) that you built from this
+               project, to check that memory wipes are still in it. Can be
+               given more than once. Reading it needs --tool. With --build,
+               seethru also checks the programs that build makes
+  --tool NAME[=PATH]
+               Allow seethru to run an outside tool on this computer. NAME is
+               objdump or dwarfdump (the LLVM versions), and both are needed
+               to read a built program. Nothing is run without this option.
+               PATH is the full path of the tool when it is not on PATH. The
+               tool gets 600 seconds, or SEETHRU_TOOL_TIMEOUT_SECS
+
+MCP server (for coding agents, over standard input and output)
+  --root DIR   A folder the agent may scan. Can be given more than once.
+               Without it, only the current folder
+  --allow-build
+               Let the agent ask for a scan that builds the project
+  --tool NAME[=PATH]
+               Let the agent ask for a scan that runs this outside tool
+  The agent cannot change these. Only the flags you start the server with
+  decide what may run
 ";
 
 const REPORT_DIR: &str = ".seethru";
 const REPORT_FILE: &str = "report.html";
 
+#[allow(clippy::large_enum_variant)]
 enum Command {
     Scan {
         path: PathBuf,
@@ -64,6 +90,13 @@ enum Command {
         compile_commands: Option<PathBuf>,
         llvm_ir: Vec<PathBuf>,
         build: bool,
+        binaries: Vec<PathBuf>,
+        tools: Vec<tool::Permit>,
+    },
+    Mcp {
+        roots: Vec<PathBuf>,
+        allow_build: bool,
+        tools: Vec<tool::Permit>,
     },
     Schema,
     Version,
@@ -96,6 +129,8 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut compile_commands = None;
             let mut llvm_ir = Vec::new();
             let mut build = false;
+            let mut binaries = Vec::new();
+            let mut tools: Vec<tool::Permit> = Vec::new();
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
@@ -107,6 +142,17 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     }
                     Long("llvm-ir") => llvm_ir.push(PathBuf::from(parser.value()?)),
                     Long("build") => build = true,
+                    Long("binary") => binaries.push(PathBuf::from(parser.value()?)),
+                    Long("tool") => {
+                        let permit = tool::permit(&parser.value()?)
+                            .map_err(|message| lexopt::Error::Custom(message.into()))?;
+                        if tools.iter().any(|known| known.name == permit.name) {
+                            return Err(lexopt::Error::Custom(
+                                format!("--tool {} was given twice", permit.name.as_str()).into(),
+                            ));
+                        }
+                        tools.push(permit);
+                    }
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -135,6 +181,16 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     "--sarif-out must be a different file from --sarif and --out".into(),
                 ));
             }
+            if !tools.is_empty() && binaries.is_empty() && !build {
+                return Err(lexopt::Error::Custom(
+                    "--tool has nothing to read. Add --binary FILE or --build".into(),
+                ));
+            }
+            if binaries.len() > tool::MAX_BINARIES {
+                return Err(lexopt::Error::Custom(
+                    format!("--binary can be given at most {} times", tool::MAX_BINARIES).into(),
+                ));
+            }
             Ok(Command::Scan {
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
                 out,
@@ -147,6 +203,40 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 compile_commands,
                 llvm_ir,
                 build,
+                binaries,
+                tools,
+            })
+        }
+        "mcp" => {
+            let mut roots = Vec::new();
+            let mut allow_build = false;
+            let mut tools: Vec<tool::Permit> = Vec::new();
+            while let Some(arg) = parser.next()? {
+                match arg {
+                    Long("root") => roots.push(PathBuf::from(parser.value()?)),
+                    Long("allow-build") => allow_build = true,
+                    Long("tool") => {
+                        let permit = tool::permit(&parser.value()?)
+                            .map_err(|message| lexopt::Error::Custom(message.into()))?;
+                        if tools.iter().any(|known| known.name == permit.name) {
+                            return Err(lexopt::Error::Custom(
+                                format!("--tool {} was given twice", permit.name.as_str()).into(),
+                            ));
+                        }
+                        tools.push(permit);
+                    }
+                    other => return Err(other.unexpected()),
+                }
+            }
+            if !tools.is_empty() && !allow_build {
+                return Err(lexopt::Error::Custom(
+                    "--tool has nothing to read. Add --allow-build".into(),
+                ));
+            }
+            Ok(Command::Mcp {
+                roots,
+                allow_build,
+                tools,
             })
         }
         "schema" => match parser.next()? {
@@ -194,6 +284,14 @@ fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     let mut stdout = io::stdout().lock();
     match command {
+        Command::Mcp {
+            roots,
+            allow_build,
+            tools,
+        } => {
+            let server = mcp::Server::new(roots, allow_build, tools)?;
+            seethru_mcp::serve(io::stdin().lock(), &mut stdout, &server)?;
+        }
         Command::Help => stdout.write_all(USAGE.as_bytes())?,
         Command::Version => writeln!(stdout, "seethru {}", env!("CARGO_PKG_VERSION"))?,
         Command::Schema => {
@@ -212,17 +310,25 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             compile_commands,
             mut llvm_ir,
             build,
+            binaries,
+            tools,
         } => {
+            let mut built = None;
             if build {
                 let projects = seethru_analyzer::cargo_projects(&path, read_config)?;
-                llvm_ir.extend(build::build(&path, &state_dir(&path)?, &projects, lang)?);
+                let dirs = build::build(&path, &state_dir(&path)?, &projects, lang)?;
+                llvm_ir.extend(dirs.iter().cloned());
+                built = Some(dirs);
             }
+            let collected = tool::collect(&path, &tools, &binaries, built.as_deref(), lang)?;
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
                 sarif,
                 compile_commands,
                 llvm_ir,
+                binaries: collected.binaries,
+                binary_problems: collected.problems,
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
@@ -467,7 +573,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir, build: false }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir, build: false, ref binaries, ref tools }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty() && binaries.is_empty() && tools.is_empty()
         ));
     }
 
@@ -665,6 +771,50 @@ mod tests {
                 if llvm_ir.len() == 2 && llvm_ir[1].as_os_str() == "b.ll"
         ));
         assert!(parse(args(&["scan", "--llvm-ir"])).is_err());
+    }
+
+    #[test]
+    fn scan_runs_outside_tools_only_when_they_are_named() {
+        assert!(matches!(
+            parse(args(&["scan", "--binary", "out/app", "--tool", "objdump", "--tool", "dwarfdump=/opt/bin/dwarfdump"])),
+            Ok(Command::Scan { ref binaries, ref tools, build: false, .. })
+                if binaries.len() == 1
+                    && tools.len() == 2
+                    && tools[1].path.as_deref() == Some(std::path::Path::new("/opt/bin/dwarfdump"))
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "--build", "--tool", "objdump"])),
+            Ok(Command::Scan { build: true, ref tools, .. }) if tools.len() == 1
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "--binary", "out/app"])),
+            Ok(Command::Scan { ref tools, .. }) if tools.is_empty()
+        ));
+        assert!(parse(args(&["scan", "--tool", "objdump"])).is_err());
+        assert!(parse(args(&["scan", "--build", "--tool", "ghidra"])).is_err());
+        assert!(parse(args(&["scan", "--build", "--tool", "objdump=bin/objdump"])).is_err());
+        assert!(
+            parse(args(&[
+                "scan", "--build", "--tool", "objdump", "--tool", "objdump"
+            ]))
+            .is_err()
+        );
+        assert!(parse(args(&["scan", "--build", "--tool"])).is_err());
+    }
+
+    #[test]
+    fn mcp_server_takes_its_permissions_from_launch_flags_only() {
+        assert!(matches!(
+            parse(args(&["mcp"])),
+            Ok(Command::Mcp { ref roots, allow_build: false, ref tools }) if roots.is_empty() && tools.is_empty()
+        ));
+        assert!(matches!(
+            parse(args(&["mcp", "--root", "a", "--root", "b", "--allow-build", "--tool", "objdump"])),
+            Ok(Command::Mcp { ref roots, allow_build: true, ref tools }) if roots.len() == 2 && tools.len() == 1
+        ));
+        assert!(parse(args(&["mcp", "--tool", "objdump"])).is_err());
+        assert!(parse(args(&["mcp", "--build"])).is_err());
+        assert!(parse(args(&["mcp", "extra"])).is_err());
     }
 
     #[test]
