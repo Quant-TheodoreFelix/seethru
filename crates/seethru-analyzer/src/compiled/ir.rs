@@ -332,7 +332,8 @@ pub(crate) fn parse(text: &str) -> Module {
 
     for line in text.lines() {
         if line.len() > MAX_LINE_BYTES {
-            module.truncated = true;
+            module.truncated |=
+                current.is_some() || line.starts_with("define ") || line.starts_with('!');
             continue;
         }
         if let Some((function, names, attribute)) = current.as_mut() {

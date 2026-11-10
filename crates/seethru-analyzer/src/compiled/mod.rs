@@ -18,9 +18,9 @@ use crate::graph::{Graph, file_id, file_step};
 use crate::rules;
 use crate::walk::{SKIPPED_DIRS, read_bytes};
 
-const MAX_FILES: usize = 64;
-const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_FILES: usize = 1024;
+const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_DEPTH: usize = 6;
 const MAX_FINDINGS: usize = 500;
 const MAX_STEPS: usize = 6;
@@ -265,7 +265,7 @@ fn collect(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> bool {
                 partial |= collect(&path, depth + 1, out);
             }
         } else if meta.is_file() && has_extension(&path, "ll") {
-            if out.len() >= MAX_FILES * 4 {
+            if out.len() >= MAX_FILES {
                 return true;
             }
             out.push(path);
