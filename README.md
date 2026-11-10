@@ -37,15 +37,16 @@ The report is written to `<project path>/.seethru/report.html`, and that directo
 | `--build-output DIR` | Read the Vite or Next build output in DIR, a folder inside the project             |
 
 
-| Check                     | What it finds                                                                                           |
-|---------------------------|---------------------------------------------------------------------------------------------------------|
-| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL                                |
-| Supabase functions        | `security definer` functions that anyone or any signed-in user can call through `rpc()`, which skip RLS |
-| Supabase views            | Views that skip RLS and that anyone or any signed-in user can read                                      |
-| Supabase Storage          | Storage policies that open every file in a bucket to anyone or any signed-in user                       |
-| service_role key exposure | Browser code that reads the service_role key from a public env variable                                 |
-| Exposed secrets           | API keys and database URLs in code, build output and env files                                          |
-| Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked            |
+| Check                     | What it finds                                                                                                        |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------|
+| Supabase RLS              | Tables with RLS off and policies that open every row, from migration SQL                                             |
+| Supabase functions        | `security definer` functions that anyone or any signed-in user can call through `rpc()`, which skip RLS              |
+| Supabase views            | Views that skip RLS and that anyone or any signed-in user can read                                                   |
+| Supabase Storage          | Storage policies that open every file in a bucket to anyone or any signed-in user                                    |
+| service_role key exposure | Browser code that reads the service_role key from a public env variable                                              |
+| Unguarded service_role    | Routes, server actions and Edge Functions that reach code using the service_role key without checking who is calling |
+| Exposed secrets           | API keys and database URLs in code, build output and env files                                                       |
+| Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked                         |
 
 ## Configuration
 
@@ -79,24 +80,35 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `rule` | Every finding of a rule, by the rule ID in the table below              |
 | `path` | Findings reported in files that match a pattern, written like `exclude` |
 
-| Rule ID                                | Severity        | Finding                                                                                              |
-|----------------------------------------|-----------------|------------------------------------------------------------------------------------------------------|
-| `supabase-rls-disabled`                | Critical        | A table in the `public` schema has RLS off                                                           |
-| `supabase-policy-unrestricted`         | Low to Critical | A policy lets anyone, or any signed-in user, reach every row                                         |
-| `supabase-function-bypasses-rls`       | Low to High     | A `security definer` function that anon or signed-in users can call through `rpc()` runs without RLS |
-| `supabase-view-bypasses-rls`           | Low to Critical | A view in the `public` schema skips RLS and can be read by anon or signed-in users                   |
-| `supabase-storage-policy-unrestricted` | Low to Critical | A `storage.objects` policy lets anyone, or any signed-in user, reach every file in a bucket          |
-| `supabase-service-role-in-browser`     | Critical        | Browser code reads the service_role key from a public env variable                                   |
-| `secret-in-browser-code`               | Critical        | A secret in code or files that reach the browser                                                     |
-| `secret-in-public-env-var`             | Critical        | A secret in an env variable with a public prefix such as `VITE_`                                     |
-| `secret-in-source-code`                | High            | A secret in a file that does not reach the browser, such as server code or an env file               |
-| `supabase-table-schema-missing`        | Info            | The code queries a table that no SQL file in the repo creates                                        |
+| Rule ID                                | Severity        | Finding                                                                                                                      |
+|----------------------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------|
+| `supabase-rls-disabled`                | Critical        | A table in the `public` schema has RLS off                                                                                   |
+| `supabase-policy-unrestricted`         | Low to Critical | A policy lets anyone, or any signed-in user, reach every row                                                                 |
+| `supabase-function-bypasses-rls`       | Low to High     | A `security definer` function that anon or signed-in users can call through `rpc()` runs without RLS                         |
+| `supabase-view-bypasses-rls`           | Low to Critical | A view in the `public` schema skips RLS and can be read by anon or signed-in users                                           |
+| `supabase-storage-policy-unrestricted` | Low to Critical | A `storage.objects` policy lets anyone, or any signed-in user, reach every file in a bucket                                  |
+| `supabase-service-role-in-browser`     | Critical        | Browser code reads the service_role key from a public env variable                                                           |
+| `supabase-service-role-unguarded`      | Medium to High  | A route, server action or Edge Function reaches code that uses the service_role key, and nothing checks who is calling first |
+| `secret-in-browser-code`               | Critical        | A secret in code or files that reach the browser                                                                             |
+| `secret-in-public-env-var`             | Critical        | A secret in an env variable with a public prefix such as `VITE_`                                                             |
+| `secret-in-source-code`                | High            | A secret in a file that does not reach the browser, such as server code or an env file                                       |
+| `supabase-table-schema-missing`        | Info            | The code queries a table that no SQL file in the repo creates                                                                |
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
 - Accepted findings stay in the report and the CLI summary under their own heading, with the reason. They do not count toward the totals or color the graph.
 - If `seethru.toml` cannot be used, the scan stops and names the line instead of ignoring it. That covers unknown keys, a missing reason, an unknown rule ID and invalid patterns. The file must be a regular file of up to 64 KB, with at most 256 `exclude` patterns and 1,000 `[[accept]]` entries.
 - `--no-config` ignores the file. Use it when you review a project someone else wrote, so its config cannot hide anything from you.
+
+## Entry points
+
+seethru follows each entry point to the code it runs and checks whether something verifies the caller before that code uses the service_role key.
+
+- Entry points are Next route handlers (`app/**/route.ts` and `pages/api/**`), the exported functions of `"use server"` files, and Supabase Edge Functions.
+- A check counts when the code stops early with `return`, `throw` or `redirect()` if there is no user. It can sit in the handler or in a helper that the handler calls first.
+- Recognized checks are `supabase.auth.getUser()`, `getClaims()` and `getSession()` (a weak check on the server), next-auth `getServerSession()`, Clerk `auth()`, `currentUser()` and `auth.protect()`, Stripe webhook signatures, Firebase `verifyIdToken()`, JWT checks with jose or jsonwebtoken, and comparing a request value with a secret env variable.
+- When seethru cannot tell, for example a middleware that checks users, an auth library it does not know, or a 401 response after a check it cannot read, it reports nothing for that entry point instead of guessing.
+- A Supabase client passed to another function as an argument is not followed yet.
 
 ## Build output
 
@@ -109,7 +121,7 @@ $ seethru scan . --build-output .next
 
 - The folder must be inside the scanned project and must not be a symbolic link. It is read even when an `exclude` pattern matches it.
 - **Vite**: turn on `build.manifest` and `build.sourcemap` in `vite.config` so seethru can see every file in the bundle. With source maps for every chunk, files that the bundle leaves out are no longer treated as browser code.
-- **Next**: seethru reads `.next`. The `"use client"` files are confirmed from the build manifests. To confirm every file that reaches the browser, set `productionBrowserSourceMaps: true` in `next.config`. Routes from the build appear as entry points in the graph.
+- **Next**: seethru reads `.next`. The `"use client"` files are confirmed from the build manifests. To confirm every file that reaches the browser, set `productionBrowserSourceMaps: true` in `next.config`. Routes in the build manifests also appear as entry points, even when seethru cannot find their handler in the source.
 - Findings on files that the build output confirms are no longer marked as likely. A secret found in a bundle points back to its source line through the source map.
 - If any source file is newer than the build output by more than 2 seconds, the build output is not used and the report says so under "Not checked". Build again and rerun.
 - Even without the option, files under `.next/server` and `.next/standalone` are treated as server code, `.next/static` as browser code and `.next/cache` as build cache.

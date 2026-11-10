@@ -38,15 +38,16 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | `--build-output DIR` | `DIR`에 있는 Vite 또는 Next 빌드 결과물을 읽습니다. 프로젝트 안의 폴더여야 합니다 |
 
 
-| 탐지 항목            | 설명                                                                                         |
-|----------------------|----------------------------------------------------------------------------------------------|
-| Supabase RLS         | 마이그레이션 SQL에서 RLS가 꺼진 테이블, 조건 없이 모든 행을 연 정책                          |
-| Supabase 함수        | 누구나, 또는 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수 (RLS를 건너뜀) |
-| Supabase 뷰          | RLS를 건너뛰고 누구나, 또는 로그인한 사용자가 읽을 수 있는 뷰                                |
-| Supabase Storage     | 버킷의 모든 파일을 누구나, 또는 로그인한 모든 사용자에게 여는 Storage 정책                   |
-| service_role 키 노출 | 브라우저 코드가 공개 환경변수로 service_role 키를 읽는 경우                                  |
-| 비밀 값 노출         | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                           |
-| 스키마 없는 테이블   | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블         |
+| 탐지 항목              | 설명                                                                            |
+|--------------------|-------------------------------------------------------------------------------|
+| Supabase RLS       | 마이그레이션 SQL에서 RLS가 꺼진 테이블, 조건 없이 모든 행을 연 정책                                    |
+| Supabase 함수        | 누구나, 또는 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수 (RLS를 건너뜀)           |
+| Supabase 뷰         | RLS를 건너뛰고 누구나, 또는 로그인한 사용자가 읽을 수 있는 뷰                                         |
+| Supabase Storage   | 버킷의 모든 파일을 누구나, 또는 로그인한 모든 사용자에게 여는 Storage 정책                                |
+| service_role 키 노출  | 브라우저 코드가 공개 환경변수로 service_role 키를 읽는 경우                                       |
+| 확인 없는 service_role | 누가 부르는지 확인하지 않고 service_role 키를 쓰는 코드에 닿는 route, server action, Edge Function |
+| 비밀 값 노출            | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                                    |
+| 스키마 없는 테이블         | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블                           |
 
 ## 설정
 
@@ -81,24 +82,35 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `path` | 패턴에 맞는 파일에서 보고된 탐지. 패턴은 `exclude`와 같은 방식으로 씁니다  |
 
 
-| 규칙 ID                                | 심각도      | 탐지 내용                                                                                   |
-|----------------------------------------|-------------|---------------------------------------------------------------------------------------------|
-| `supabase-rls-disabled`                | 치명적      | `public` 스키마의 테이블에 RLS가 꺼져 있음                                                  |
-| `supabase-policy-unrestricted`         | 낮음~치명적 | 정책이 누구나, 또는 로그인한 모든 사용자에게 모든 행을 엶                                   |
-| `supabase-function-bypasses-rls`       | 낮음~높음   | anon이나 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수가 RLS 없이 실행됨 |
-| `supabase-view-bypasses-rls`           | 낮음~치명적 | `public` 스키마의 뷰가 RLS를 건너뛰고 anon이나 로그인한 사용자에게 읽힘                     |
-| `supabase-storage-policy-unrestricted` | 낮음~치명적 | `storage.objects` 정책이 누구나, 또는 로그인한 모든 사용자에게 버킷의 모든 파일을 엶        |
-| `supabase-service-role-in-browser`     | 치명적      | 브라우저 코드가 공개 환경변수로 service_role 키를 읽음                                      |
-| `secret-in-browser-code`               | 치명적      | 브라우저로 전달되는 코드나 파일에 비밀 값이 있음                                            |
-| `secret-in-public-env-var`             | 치명적      | `VITE_` 같은 공개 접두사가 붙은 환경변수에 비밀 값이 있음                                   |
-| `secret-in-source-code`                | 높음        | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음                    |
-| `supabase-table-schema-missing`        | 정보        | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                                           |
+| 규칙 ID                                  | 심각도    | 탐지 내용                                                                          |
+|----------------------------------------|--------|--------------------------------------------------------------------------------|
+| `supabase-rls-disabled`                | 치명적    | `public` 스키마의 테이블에 RLS가 꺼져 있음                                                  |
+| `supabase-policy-unrestricted`         | 낮음~치명적 | 정책이 누구나, 또는 로그인한 모든 사용자에게 모든 행을 엶                                              |
+| `supabase-function-bypasses-rls`       | 낮음~높음  | anon이나 로그인한 사용자가 `rpc()`로 부를 수 있는 `security definer` 함수가 RLS 없이 실행됨            |
+| `supabase-view-bypasses-rls`           | 낮음~치명적 | `public` 스키마의 뷰가 RLS를 건너뛰고 anon이나 로그인한 사용자에게 읽힘                                |
+| `supabase-storage-policy-unrestricted` | 낮음~치명적 | `storage.objects` 정책이 누구나, 또는 로그인한 모든 사용자에게 버킷의 모든 파일을 엶                       |
+| `supabase-service-role-in-browser`     | 치명적    | 브라우저 코드가 공개 환경변수로 service_role 키를 읽음                                           |
+| `supabase-service-role-unguarded`      | 중간~높음  | route, server action, Edge Function이 누가 부르는지 확인하지 않고 service_role 키를 쓰는 코드에 닿음 |
+| `secret-in-browser-code`               | 치명적    | 브라우저로 전달되는 코드나 파일에 비밀 값이 있음                                                    |
+| `secret-in-public-env-var`             | 치명적    | `VITE_` 같은 공개 접두사가 붙은 환경변수에 비밀 값이 있음                                           |
+| `secret-in-source-code`                | 높음     | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음                                      |
+| `supabase-table-schema-missing`        | 정보     | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                                                  |
 
 - 문제 ID는 규칙 ID 뒤에 그래프 노드를 붙인 형태입니다. 예를 들어 `supabase-rls-disabled:table:public.orders`입니다.
 - 비밀 값 탐지의 문제 ID는 파일, 비밀 값 종류, 그 파일에서 같은 종류 중 몇 번째인지로 이루어집니다. 예를 들어 `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`입니다. 파일의 다른 코드가 바뀌어도 ID는 그대로입니다.
 - 허용한 문제는 리포트와 CLI 요약에서 사유와 함께 따로 보여 줍니다. 전체 개수에는 들어가지 않고 그래프 색에도 반영되지 않습니다.
 - `seethru.toml`을 쓸 수 없으면 무시하지 않고, 문제가 있는 줄을 알려 주며 검사를 멈춥니다. 모르는 키, 빠진 사유, 없는 규칙 ID, 잘못된 패턴이 여기에 해당합니다. 파일은 64KB 이하의 일반 파일이어야 하고, `exclude` 패턴은 256개, `[[accept]]` 항목은 1,000개까지 쓸 수 있습니다.
 - `--no-config`를 붙이면 이 파일을 무시합니다. 다른 사람이 만든 프로젝트를 검토할 때 그 프로젝트의 설정이 문제를 숨기지 못하도록 이 옵션을 쓰세요.
+
+## 진입점
+
+seethru는 진입점마다 실행되는 코드를 따라가서, 그 코드가 service_role 키를 쓰기 전에 부른 사람을 확인하는지 봅니다.
+
+- 진입점은 Next route handler(`app/**/route.ts`, `pages/api/**`), `"use server"` 파일이 내보낸 함수, Supabase Edge Function입니다.
+- 사용자가 없을 때 `return`, `throw`, `redirect()`로 일찍 멈추면 확인으로 인정합니다. 처리 함수 안에 있어도 되고, 처리 함수가 먼저 부르는 보조 함수 안에 있어도 됩니다.
+- 알아보는 확인은 `supabase.auth.getUser()`, `getClaims()`, `getSession()`(서버에서는 약한 확인), next-auth `getServerSession()`, Clerk `auth()`, `currentUser()`, `auth.protect()`, Stripe 웹훅 서명, Firebase `verifyIdToken()`, jose나 jsonwebtoken의 JWT 확인, 요청 값과 비밀 환경변수 비교입니다.
+- 사용자를 확인하는 middleware, 모르는 인증 라이브러리, 읽을 수 없는 확인 뒤의 401 응답처럼 판단할 수 없으면 추측하지 않고 그 진입점은 알리지 않습니다.
+- 다른 함수에 인자로 넘긴 Supabase 클라이언트는 아직 따라가지 않습니다.
 
 ## 빌드 결과물
 
@@ -111,7 +123,7 @@ $ seethru scan . --build-output .next
 
 - 폴더는 검사하는 프로젝트 안에 있어야 하고 심볼릭 링크이면 안 됩니다. `exclude` 패턴에 맞아도 이 폴더는 읽습니다.
 - **Vite**: `vite.config`에서 `build.manifest`와 `build.sourcemap`을 켜면 번들에 들어간 모든 파일을 볼 수 있습니다. 모든 청크에 소스맵이 있으면 번들에 들어가지 않은 파일은 더 이상 브라우저 코드로 취급하지 않습니다.
-- **Next**: `.next`를 읽습니다. `"use client"` 파일은 빌드 매니페스트로 확인합니다. 브라우저에 닿는 모든 파일을 확인하려면 `next.config`에서 `productionBrowserSourceMaps: true`를 설정하세요. 빌드에 포함된 라우트는 그래프에 진입점으로 나타납니다.
+- **Next**: `.next`를 읽습니다. `"use client"` 파일은 빌드 매니페스트로 확인합니다. 브라우저에 닿는 모든 파일을 확인하려면 `next.config`에서 `productionBrowserSourceMaps: true`를 설정하세요. 빌드 매니페스트에 있는 라우트는 소스에서 처리 함수를 찾지 못해도 진입점으로 나타납니다.
 - 빌드 결과물로 확인한 파일의 탐지에는 "추정" 표시가 붙지 않습니다. 번들에서 찾은 비밀 값은 소스맵을 따라 원래 소스 줄을 가리킵니다.
 - 소스 파일 중 하나라도 빌드 결과물보다 2초를 넘게 새로우면 빌드 결과물을 쓰지 않고, 리포트의 "확인하지 못한 것"에 그 사실을 적습니다. 다시 빌드한 뒤 실행하세요.
 - 옵션이 없어도 `.next/server`와 `.next/standalone`은 서버 코드, `.next/static`은 브라우저 코드, `.next/cache`는 빌드 캐시로 취급합니다.
