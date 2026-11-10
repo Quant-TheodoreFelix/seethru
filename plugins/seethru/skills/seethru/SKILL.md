@@ -36,6 +36,7 @@ Run from the project root (the folder that holds `package.json`, `supabase/`, or
 | `dist/` next to a Vite config, newer than the sources | `--build-output dist` |
 | `.next/` newer than the sources | `--build-output .next` |
 | `compile_commands.json` (often `build/compile_commands.json`) | `--compile-commands <that file>` |
+| `Cargo.toml` and `.ll` files the user already built (see the Rust rule below) | `--llvm-ir <folder or file>` (repeatable) |
 | A SARIF file the user already made with Semgrep, CodeQL, Joern, clang or GCC | `--sarif <file>` (up to 8) |
 | `seethru.toml` in a project that is **not** the user's own | `--no-config`, so its `exclude` and `[[accept]]` cannot hide findings |
 
@@ -45,6 +46,7 @@ Rules for inputs:
 - For Vite, the build is most useful with `build.manifest: true` and `build.sourcemap: true`. For Next, `productionBrowserSourceMaps: true`. Suggest these; do not edit config just to scan.
 - The build folder and the compile database must be inside the scanned project. SARIF files may live anywhere.
 - seethru never runs another scanner. Only pass SARIF files that already exist.
+- **Rust.** Timing checks need compiled output, and seethru never runs `cargo`. If no `.ll` files exist, scan without them and give the user this command: `RUSTFLAGS="--emit=llvm-ir,asm -C debuginfo=line-tables-only" cargo build --release`, then `--llvm-ir target/release/deps` (or `target/<triple>/release/deps`). Keep the `.s` files next to the `.ll` files; they turn `review` into `likely` and remove divisions the compiler replaced. The output folder may be outside the project, but it must be built from this checkout so its paths match.
 - For Supabase, migrations must be in the repo. If tables were made in the dashboard, tell the user `supabase db dump --schema public > supabase/migrations/0000_dump.sql` would let seethru check RLS, and let them run it.
 
 ## 3. Scan
@@ -106,11 +108,13 @@ What the rules mean and what the fix usually is:
 | `supabase-table-schema-missing` (info) | Code uses a table no SQL in the repo creates | Not a bug by itself. Ask for a schema dump (step 2) |
 | `firmware-insecure-option-on`, `firmware-ota-over-http`, `firmware-tls-verification-off` | A risky `CONFIG_*=y` in `sdkconfig*` or `prj.conf` | Turn it off in release settings; move dev-only settings to a separate defaults file |
 | `firmware-ota-unguarded` | An ESP-IDF HTTP route writes a firmware update with no caller check found | Check a device-stored secret in constant time before the first write; accept only signed images |
+| `secret-dependent-division` | Compiled Rust code divides (`/`, `%`, `rem_euclid`) a value read from memory the code wipes on purpose. `likely` means the machine code has the division instruction | First decide whether the value is really secret. If so, replace the division with a multiply and shift by constants for that divisor, test it against the old result over the whole range, then ask the user to rebuild and rescan |
+| `cargo-dependency-not-pinned` (low) | A git dependency without `rev`, or version `*`, in a project with no `Cargo.lock` | Add `rev` or the tested version; commit `Cargo.lock` for programs |
 | `external` | Another scanner's result, always `review`, never above `high` | Read the code at that line first. Fix only if it is real |
 
 Rules of interpretation that matter:
 
-- **No finding is not "safe".** Always relay every `NOT CHECKED` limitation to the user. They name the blind spots of this scan: no build output read, dashboard-only policies, shallow C/C++ reading, firmware protection state, outside results not verified or dropped.
+- **No finding is not "safe".** Always relay every `NOT CHECKED` limitation to the user. They name the blind spots of this scan: a project kind seethru does not recognize, Rust compiled output not given or only partly checked, no build output read, dashboard-only policies, shallow C/C++ reading, firmware protection state, outside results not verified or dropped.
 - seethru stays silent when it cannot decide. An entry point with `exposure: unknown` in `nodes` was not cleared; it was not judged. To list them: nodes where `kind.type == "entryPoint"` and `kind.exposure == "unknown"`. Mention the count, and review the important ones by hand if the user wants depth.
 - `truncated: true` or a high `filesSkipped` means part of the project was not read. Say so.
 - Secret values are masked everywhere in the report. **Never print, copy or reconstruct a raw secret** from the source files into chat, commits or logs. Refer to it by path and line.
@@ -133,6 +137,8 @@ a, b = ids(sys.argv[1]), ids(sys.argv[2])
 print("fixed:", sorted(set(a) - set(b))); print("new:", sorted(set(b) - set(a))); print("left:", len(b))
 PY
 ```
+
+For `secret-dependent-division`, the old `.ll` and `.s` files describe the old code. A rescan proves nothing until the user rebuilds with the same command, so ask for the rebuild and then compare IDs.
 
 If the fix changed build inputs, a `--build-output` folder is now older than the sources and seethru will ignore it (limitation `buildOutputStale`). Ask the user to rebuild rather than dropping the option silently.
 
@@ -175,11 +181,12 @@ Lead with the outcome, in the user's language and in plain words (the audience i
 ```
 seethru scan [PATH] [--out FILE] [--json] [--lang en|ko] [--no-config]
              [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
-             [--compile-commands FILE]
+             [--compile-commands FILE] [--llvm-ir PATH]...
 seethru schema        # JSON Schema of the report
 ```
 
 - `--sarif-out FILE` writes seethru's own findings as SARIF 2.1.0 (for CI or GitHub code scanning). Outside results are not written again. It must differ from `--out` and `--sarif`.
 - `--json` and `--out` cannot be combined. `--json` prints to stdout and writes no HTML.
-- Always skipped: `.git`, `node_modules`, `.pnpm-store`, `.yarn`, `.seethru`, `.pio`, `managed_components`, `CMakeFiles`. In a CMake, PlatformIO or ESP-IDF project the root `build/` and `out/` are not read.
+- Always skipped: `.git`, `node_modules`, `.pnpm-store`, `.yarn`, `.seethru`, `.pio`, `managed_components`, `CMakeFiles`. In a CMake, PlatformIO or ESP-IDF project the root `build/` and `out/` are not read, and a `target/` folder next to a `Cargo.toml` is not read as source.
+- Rust limits: only divisions of secret values are checked in compiled output. Secret-dependent branches and table lookups, and whether a wipe survives the compiler, are **not** checked, and a value is secret only when the code wipes it with an explicit call. Never tell the user their Rust code is constant time because seethru found nothing.
 - Not covered at all: dynamic testing of a deployed app, Firebase, security headers and CORS, IDOR between accounts, memory-safety bugs in C/C++ (use another scanner and `--sarif`), Arduino web servers, BLE and MQTT entry points, hard-coded Wi-Fi passwords. Say so when the user asks about these instead of implying they were checked.
