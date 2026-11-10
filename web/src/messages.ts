@@ -54,6 +54,7 @@ export interface Messages {
   config: string;
   service: string;
   scanned: (target: ScanReport["target"]) => string;
+  reportedBy: string;
   colorTheme: string;
   languageSwitch: string;
   openTitle: string;
@@ -171,10 +172,14 @@ const en: Messages = {
       `${filesScanned} ${filesScanned === 1 ? "file" : "files"} scanned`,
       filesExcluded > 0 ? `${filesExcluded} excluded by ${configFile ?? "seethru.toml"}` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`build output read from ${input.path}`] : [])),
+      ...inputs.flatMap((input) =>
+        input.type === "sarif" ? [`${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}`] : [],
+      ),
       truncated ? "stopped early" : "",
     ]
       .filter(Boolean)
       .join(", "),
+  reportedBy: "Reported by",
   colorTheme: "Color theme",
   languageSwitch: "Language",
   openTitle: "Open a scan report",
@@ -290,10 +295,12 @@ const ko: Messages = {
       `파일 ${filesScanned}개 검사`,
       filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`${input.path} 빌드 결과물 읽음`] : [])),
+      ...inputs.flatMap((input) => (input.type === "sarif" ? [`${input.engine} 결과 ${input.results}개`] : [])),
       truncated ? "일부만 검사함" : "",
     ]
       .filter(Boolean)
       .join(", "),
+  reportedBy: "알린 도구",
   colorTheme: "색 테마",
   languageSwitch: "언어",
   openTitle: "스캔 리포트 열기",

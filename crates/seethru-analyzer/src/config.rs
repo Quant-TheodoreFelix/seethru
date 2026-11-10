@@ -29,6 +29,9 @@ struct RawAccept {
     id: Option<String>,
     rule: Option<RuleId>,
     path: Option<String>,
+    engine: Option<String>,
+    #[serde(rename = "external-rule")]
+    external_rule: Option<String>,
     reason: String,
 }
 
@@ -36,6 +39,8 @@ struct Accept {
     id: Option<String>,
     rule: Option<RuleId>,
     path: Option<Glob>,
+    engine: Option<String>,
+    external_rule: Option<String>,
     reason: String,
 }
 
@@ -92,9 +97,18 @@ impl Config {
                     "accept entry {number} needs a reason of 1 to {MAX_REASON_CHARS} characters"
                 )));
             }
-            if entry.id.is_none() && entry.rule.is_none() && entry.path.is_none() {
+            let narrowed = entry.id.is_some()
+                || entry.path.is_some()
+                || entry.engine.is_some()
+                || entry.external_rule.is_some();
+            if entry.rule.is_none() && !narrowed {
                 return Err(config_error(&format!(
-                    "accept entry {number} needs an id, a rule or a path"
+                    "accept entry {number} needs an id, a rule, a path, an engine or an external-rule"
+                )));
+            }
+            if entry.rule == Some(RuleId::External) && !narrowed {
+                return Err(config_error(&format!(
+                    "accept entry {number} would hide every outside scanner result, add an engine, an external-rule, a path or an id"
                 )));
             }
             let path = entry
@@ -107,6 +121,8 @@ impl Config {
                 id: entry.id,
                 rule: entry.rule,
                 path,
+                engine: entry.engine,
+                external_rule: entry.external_rule,
                 reason: reason.chars().filter(|c| !c.is_control()).collect(),
             });
         }
@@ -123,6 +139,13 @@ impl Config {
             .find(|entry| {
                 entry.id.as_ref().is_none_or(|id| *id == finding.id)
                     && entry.rule.is_none_or(|rule| rule == finding.rule)
+                    && entry.engine.as_ref().is_none_or(|engine| {
+                        finding.rule == RuleId::External && *engine == finding.origin.engine
+                    })
+                    && entry.external_rule.as_ref().is_none_or(|rule| {
+                        finding.rule == RuleId::External
+                            && finding.origin.rule.as_ref() == Some(rule)
+                    })
                     && entry.path.as_ref().is_none_or(|glob| {
                         finding
                             .location

@@ -423,6 +423,15 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                     <code>{selected.cwe.map((number) => `CWE-${number}`).join(", ")}</code>
                   </p>
                 ) : null}
+                {selected.origin.engine !== "seethru" ? (
+                  <p className="finding-id">
+                    <span>{m.reportedBy}</span>
+                    <code>
+                      {selected.origin.engine}
+                      {selected.origin.rule ? ` ${selected.origin.rule}` : ""}
+                    </code>
+                  </p>
+                ) : null}
                 <Evidence finding={selected} nodes={nodeById} />
                 {selected.fixPrompt ? <FixPrompt key={`${selected.id}:${lang}`} prompt={selected.fixPrompt[lang]} /> : null}
               </motion.section>

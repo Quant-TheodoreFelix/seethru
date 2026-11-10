@@ -11,7 +11,7 @@ seethru - see through your app before attackers do
 
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
-               [--build-output DIR]
+               [--build-output DIR] [--sarif FILE]...
   seethru schema
   seethru --version
 
@@ -27,6 +27,8 @@ Options
   --build-output DIR
                Read the Vite or Next build output in DIR, a folder inside the
                project. seethru never runs the build itself
+  --sarif FILE Add the results an outside scanner wrote to FILE in SARIF 2.1.0.
+               Can be given up to 8 times. seethru never runs the scanner
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -40,6 +42,7 @@ enum Command {
         lang: Lang,
         read_config: bool,
         build_output: Option<PathBuf>,
+        sarif: Vec<PathBuf>,
     },
     Schema,
     Version,
@@ -67,10 +70,12 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut lang = Lang::default();
             let mut read_config = true;
             let mut build_output = None;
+            let mut sarif = Vec::new();
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
                     Long("build-output") => build_output = Some(PathBuf::from(parser.value()?)),
+                    Long("sarif") => sarif.push(PathBuf::from(parser.value()?)),
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -98,6 +103,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 lang,
                 read_config,
                 build_output,
+                sarif,
             })
         }
         "schema" => match parser.next()? {
@@ -155,10 +161,12 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             lang,
             read_config,
             build_output,
+            sarif,
         } => {
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
+                sarif,
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
@@ -393,7 +401,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None }) if path.as_os_str() == "."
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif }) if path.as_os_str() == "." && sarif.is_empty()
         ));
     }
 
@@ -581,6 +589,15 @@ mod tests {
             })
         ));
         assert!(parse(args(&["scan", "--build-output"])).is_err());
+    }
+
+    #[test]
+    fn scan_accepts_sarif_files() {
+        assert!(matches!(
+            parse(args(&["scan", "app", "--sarif", "a.sarif", "--sarif=b.sarif"])),
+            Ok(Command::Scan { ref sarif, .. }) if sarif.len() == 2
+        ));
+        assert!(parse(args(&["scan", "--sarif"])).is_err());
     }
 
     #[test]

@@ -314,3 +314,61 @@ fn unguarded_service_role_prompt_names_the_entry_and_the_client() {
         }
     }
 }
+
+#[test]
+fn outside_scanner_prompt_keeps_scanner_text_out() {
+    let finding = Finding {
+        id: "external:semgrep:evil.rule:file:src/a.c:1".to_owned(),
+        rule: RuleId::External,
+        severity: Severity::High,
+        confidence: Confidence::Review,
+        title: LocalizedText::default(),
+        explanation: LocalizedText::default(),
+        node: NodeId::new("file:src/a.c"),
+        location: Some(Location {
+            path: "src/a.c".to_owned(),
+            line: 12,
+            column: 3,
+        }),
+        evidence: Vec::new(),
+        origin: Origin {
+            engine: "semgrep".to_owned(),
+            inputs: vec![seethru_core::InputKind::Sarif],
+            rule: Some("evil.rule".to_owned()),
+        },
+        cwe: vec![78],
+        proof: None,
+        fix_prompt: None,
+        accepted: None,
+    };
+    let report = ScanReport {
+        schema_version: SCHEMA_VERSION,
+        tool: ToolInfo {
+            name: "seethru".to_owned(),
+            version: "0.0.0".to_owned(),
+        },
+        target: TargetInfo {
+            name: "app".to_owned(),
+            files_scanned: 1,
+            files_skipped: 0,
+            files_excluded: 0,
+            truncated: false,
+            config_file: None,
+            ecosystems: Vec::new(),
+            inputs: Vec::new(),
+            limitations: Vec::new(),
+        },
+        summary: Summary::default(),
+        nodes: Vec::new(),
+        edges: Vec::new(),
+        findings: vec![finding.clone()],
+    };
+    for lang in Lang::ALL {
+        let prompt = fix_prompt(&report, &finding, lang);
+        assert!(prompt.contains("`src/a.c:12`"), "{prompt}");
+        assert!(prompt.contains("CWE-78"), "{prompt}");
+        assert!(!prompt.contains("evil.rule"), "{prompt}");
+        assert!(!prompt.contains("semgrep"), "{prompt}");
+    }
+    assert!(has_hangul(&fix_prompt(&report, &finding, Lang::Ko)));
+}

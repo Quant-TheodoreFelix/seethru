@@ -74,15 +74,18 @@ export type EdgeKind = (typeof EDGE_KINDS)[number];
 const ECOSYSTEMS = ["next", "vite", "supabase"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source", "buildOutput"] as const;
+const INPUT_KINDS = ["source", "buildOutput", "sarif"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
 
 const BUILD_TOOLS = ["vite", "next"] as const;
 export type BuildTool = (typeof BUILD_TOOLS)[number];
 
-export type TargetInput = { type: "source" } | { type: "buildOutput"; path: string; tool: BuildTool };
+export type TargetInput =
+  | { type: "source" }
+  | { type: "buildOutput"; path: string; tool: BuildTool }
+  | { type: "sarif"; path: string; engine: string; results: number; dropped: number };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -167,7 +170,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -483,6 +486,16 @@ export function parseScanReport(input: unknown): ScanReport {
         if (kind === "source") {
           object(value, path, ["type"]);
           return { type: "source" };
+        }
+        if (kind === "sarif") {
+          const o = object(value, path, ["type", "path", "engine", "results", "dropped"]);
+          return {
+            type: "sarif",
+            path: text(o.path, `${path}.path`),
+            engine: text(o.engine, `${path}.engine`),
+            results: count(o.results, `${path}.results`),
+            dropped: count(o.dropped, `${path}.dropped`),
+          };
         }
         const o = object(value, path, ["type", "path", "tool"]);
         return { type: "buildOutput", path: text(o.path, `${path}.path`), tool: oneOf(o.tool, `${path}.tool`, BUILD_TOOLS) };

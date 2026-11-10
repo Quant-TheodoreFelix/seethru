@@ -2,6 +2,7 @@ mod build_output;
 mod classify;
 mod config;
 mod env;
+mod external;
 mod glob;
 mod graph;
 mod resolve;
@@ -43,6 +44,7 @@ pub enum ScanError {
     Io(std::io::Error),
     Config(String),
     BuildOutput(String),
+    Sarif(String),
 }
 
 impl fmt::Display for ScanError {
@@ -52,6 +54,7 @@ impl fmt::Display for ScanError {
             Self::Io(error) => write!(f, "cannot read scan target: {error}"),
             Self::Config(message) => write!(f, "cannot use {CONFIG_FILE}: {message}"),
             Self::BuildOutput(message) => write!(f, "cannot use the build output: {message}"),
+            Self::Sarif(message) => write!(f, "cannot use the SARIF file: {message}"),
         }
     }
 }
@@ -62,6 +65,7 @@ impl std::error::Error for ScanError {}
 pub struct ScanOptions {
     pub read_config: bool,
     pub build_output: Option<PathBuf>,
+    pub sarif: Vec<PathBuf>,
 }
 
 impl Default for ScanOptions {
@@ -69,6 +73,7 @@ impl Default for ScanOptions {
         Self {
             read_config: true,
             build_output: None,
+            sarif: Vec::new(),
         }
     }
 }
@@ -78,6 +83,7 @@ pub fn scan(root: &Path) -> Result<ScanReport, ScanError> {
 }
 
 pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanError> {
+    let given = std::path::absolute(root).map_err(ScanError::Io)?;
     let root = std::fs::canonicalize(root).map_err(ScanError::Io)?;
     if !root.is_dir() {
         return Err(ScanError::NotADirectory);
@@ -269,6 +275,22 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         record.emit(&mut graph, &assigned, origins);
     }
 
+    let imported = if options.sarif.is_empty() {
+        None
+    } else {
+        let imported = external::read_all(&root, &given, &options.sarif, &|rel_path| {
+            config
+                .as_ref()
+                .is_some_and(|config| config.is_excluded(rel_path))
+        })?;
+        let dropped = external::emit(&imported, &mut graph, &|rel_path| {
+            roles
+                .get(rel_path)
+                .map(|assigned| (assigned.role, assigned.basis))
+        });
+        Some((imported, dropped))
+    };
+
     let mut ecosystems = hints.ecosystems();
     if uses_supabase {
         ecosystems.push(Ecosystem::Supabase);
@@ -297,6 +319,13 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     }
     if uses_supabase {
         limitations.push(rules::limitation(LimitationCode::DashboardPoliciesUnseen));
+    }
+    if let Some((imported, dropped)) = imported {
+        limitations.push(rules::limitation(LimitationCode::ExternalNotVerified));
+        if imported.dropped || dropped {
+            limitations.push(rules::limitation(LimitationCode::ExternalResultsDropped));
+        }
+        inputs.extend(imported.inputs);
     }
 
     let name = root

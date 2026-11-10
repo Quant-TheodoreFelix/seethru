@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -62,7 +62,16 @@ pub enum Ecosystem {
 )]
 pub enum Input {
     Source {},
-    BuildOutput { path: String, tool: BuildTool },
+    BuildOutput {
+        path: String,
+        tool: BuildTool,
+    },
+    Sarif {
+        path: String,
+        engine: String,
+        results: u32,
+        dropped: u32,
+    },
 }
 
 #[derive(
@@ -81,6 +90,7 @@ pub enum BuildTool {
 pub enum InputKind {
     Source,
     BuildOutput,
+    Sarif,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -99,6 +109,8 @@ pub enum LimitationCode {
     BuildOutputStale,
     BuildOutputWithoutSourceMaps,
     DashboardPoliciesUnseen,
+    ExternalNotVerified,
+    ExternalResultsDropped,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -543,6 +555,7 @@ pub enum RuleId {
     SupabaseViewBypassesRls,
     SupabaseStoragePolicyUnrestricted,
     SupabaseServiceRoleUnguarded,
+    External,
 }
 
 impl RuleId {
@@ -559,6 +572,7 @@ impl RuleId {
             Self::SupabaseViewBypassesRls => "supabase-view-bypasses-rls",
             Self::SupabaseStoragePolicyUnrestricted => "supabase-storage-policy-unrestricted",
             Self::SupabaseServiceRoleUnguarded => "supabase-service-role-unguarded",
+            Self::External => "external",
         }
     }
 
@@ -572,7 +586,7 @@ impl RuleId {
             | Self::SecretInSourceCode
             | Self::SecretInPublicEnvVar => &[798],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
-            Self::SupabaseTableSchemaMissing => &[],
+            Self::SupabaseTableSchemaMissing | Self::External => &[],
         }
     }
 }

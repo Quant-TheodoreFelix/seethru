@@ -132,6 +132,14 @@ impl Graph {
         });
     }
 
+    pub(crate) fn has_node(&self, id: &NodeId) -> bool {
+        self.nodes.contains_key(id)
+    }
+
+    pub(crate) fn add_external(&mut self, finding: Finding) {
+        self.findings.entry(finding.id.clone()).or_insert(finding);
+    }
+
     pub(crate) fn finish(self, target: TargetInfo) -> ScanReport {
         let edges: Vec<Edge> = self
             .edges

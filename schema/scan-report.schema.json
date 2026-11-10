@@ -434,13 +434,47 @@
             "tool"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dropped": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "engine": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "results": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "sarif",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "engine",
+            "results",
+            "dropped"
+          ],
+          "type": "object"
         }
       ]
     },
     "InputKind": {
       "enum": [
         "source",
-        "buildOutput"
+        "buildOutput",
+        "sarif"
       ],
       "type": "string"
     },
@@ -465,7 +499,9 @@
         "buildOutputNotRead",
         "buildOutputStale",
         "buildOutputWithoutSourceMaps",
-        "dashboardPoliciesUnseen"
+        "dashboardPoliciesUnseen",
+        "externalNotVerified",
+        "externalResultsDropped"
       ],
       "type": "string"
     },
@@ -778,7 +814,8 @@
         "supabase-function-bypasses-rls",
         "supabase-view-bypasses-rls",
         "supabase-storage-policy-unrestricted",
-        "supabase-service-role-unguarded"
+        "supabase-service-role-unguarded",
+        "external"
       ],
       "type": "string"
     },

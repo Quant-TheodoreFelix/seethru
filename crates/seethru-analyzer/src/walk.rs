@@ -8,7 +8,7 @@ pub(crate) const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const MAX_FILES: usize = 50_000;
 pub(crate) const MAX_DEPTH: usize = 40;
 
-const SKIPPED_DIRS: &[&str] = &[
+pub(crate) const SKIPPED_DIRS: &[&str] = &[
     ".git",
     ".hg",
     ".svn",

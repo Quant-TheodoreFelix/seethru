@@ -656,6 +656,126 @@ pub(crate) fn service_role_unguarded(
     }
 }
 
+const CWE_NAMES: &[(&[u32], &str, &str)] = &[
+    (
+        &[22, 23, 36],
+        "a file path that can be steered outside its folder",
+        "폴더 밖으로 벗어날 수 있는 파일 경로",
+    ),
+    (&[77, 78, 88], "command injection", "명령 주입"),
+    (
+        &[79, 80],
+        "cross-site scripting",
+        "교차 사이트 스크립팅(XSS)",
+    ),
+    (&[89], "SQL injection", "SQL 주입"),
+    (&[94, 95], "code injection", "코드 주입"),
+    (
+        &[119, 120, 121, 122, 125, 787, 788],
+        "memory access outside a buffer",
+        "버퍼를 벗어난 메모리 접근",
+    ),
+    (
+        &[134],
+        "a format string that input can control",
+        "입력이 바꿀 수 있는 형식 문자열",
+    ),
+    (&[190, 191], "a number overflow", "정수 넘침"),
+    (&[200, 209, 532], "information exposure", "정보 노출"),
+    (
+        &[287, 306],
+        "a missing or broken sign-in check",
+        "빠졌거나 잘못된 로그인 확인",
+    ),
+    (
+        &[295, 297],
+        "a missing certificate check",
+        "인증서 확인 누락",
+    ),
+    (&[326, 327, 328], "weak cryptography", "약한 암호 사용"),
+    (&[330, 338], "weak random numbers", "예측할 수 있는 난수"),
+    (
+        &[352],
+        "cross-site request forgery",
+        "사이트 간 요청 위조(CSRF)",
+    ),
+    (&[415, 416], "use of freed memory", "해제한 메모리 사용"),
+    (&[476], "use of an empty pointer", "빈 포인터 사용"),
+    (
+        &[502],
+        "unsafe loading of untrusted data",
+        "믿을 수 없는 데이터의 안전하지 않은 해석",
+    ),
+    (&[601], "an open redirect", "열린 리다이렉트"),
+    (&[611], "unsafe XML loading", "안전하지 않은 XML 해석"),
+    (
+        &[798, 259, 321],
+        "a secret written into the code",
+        "코드에 적힌 비밀 값",
+    ),
+    (
+        &[862, 863, 285, 639],
+        "a missing permission check",
+        "권한 확인 누락",
+    ),
+    (
+        &[918],
+        "server-side request forgery",
+        "서버 쪽 요청 위조(SSRF)",
+    ),
+];
+
+pub(crate) fn cwe_name(cwe: &[u32]) -> Option<(&'static str, &'static str)> {
+    cwe.iter().find_map(|number| {
+        CWE_NAMES
+            .iter()
+            .find(|(numbers, _, _)| numbers.contains(number))
+            .map(|(_, en, ko)| (*en, *ko))
+    })
+}
+
+pub(crate) fn external(engine: &str, rule: &str, cwe: &[u32], path: &str, line: u32) -> Text {
+    let file = display_name(crate::classify::file_name(path));
+    let path = display_name(path);
+    let (title_en, title_ko) = match cwe_name(cwe) {
+        Some((en, ko)) => (
+            format!("An outside scanner ({engine}) reported possible {en} in `{file}`"),
+            format!("외부 검사 도구({engine})가 `{file}`에서 {ko} 가능성을 알렸어요"),
+        ),
+        None => (
+            format!("An outside scanner ({engine}) reported a possible problem in `{file}`"),
+            format!("외부 검사 도구({engine})가 `{file}`에서 문제 가능성을 알렸어요"),
+        ),
+    };
+    let numbers = cwe
+        .iter()
+        .map(|number| format!("CWE-{number}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (class_en, class_ko) = if numbers.is_empty() {
+        (String::new(), String::new())
+    } else {
+        (
+            format!(" It classed the problem as {numbers}."),
+            format!(" 문제 종류는 {numbers}로 분류했어요."),
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: title_en,
+            ko: title_ko,
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "The scanner {engine} flagged line {line} of `{path}` with its rule `{rule}`.{class_en} This result comes from that scanner and seethru did not check it itself. Treat it as a lead and look at the code before you change anything."
+            ),
+            ko: format!(
+                "검사 도구 {engine}가 `{path}`의 {line}번째 줄을 자기 규칙 `{rule}`로 알렸어요.{class_ko} 이 결과는 그 도구가 낸 것이고 seethru가 직접 확인한 것은 아니에요. 단서로 삼고, 고치기 전에 코드를 먼저 확인하세요."
+            ),
+        },
+    }
+}
+
 pub(crate) fn limitation(code: LimitationCode) -> Limitation {
     let (en, ko) = match code {
         LimitationCode::BuildOutputNotRead => (
@@ -673,6 +793,14 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::DashboardPoliciesUnseen => (
             "Tables and policies made in the Supabase dashboard are not in this repo, so they were not checked.",
             "Supabase 대시보드에서 만든 테이블과 정책은 저장소에 없어서 확인하지 못했어요.",
+        ),
+        LimitationCode::ExternalNotVerified => (
+            "Results from outside scanners are shown as that scanner reported them. seethru did not check them itself.",
+            "외부 검사 도구의 결과는 그 도구가 알린 그대로 보여 줘요. seethru가 직접 확인한 것은 아니에요.",
+        ),
+        LimitationCode::ExternalResultsDropped => (
+            "Some results from outside scanners were left out because they point outside this project, at excluded files, or could not be read.",
+            "외부 검사 도구의 결과 중 일부는 이 프로젝트 밖이나 제외한 파일을 가리키거나 읽을 수 없어서 뺐어요.",
         ),
     };
     Limitation {
@@ -720,6 +848,9 @@ mod tests {
             rls_disabled("todos"),
             table_schema_missing("orders"),
             service_role_in_browser("VITE_SUPABASE_SERVICE_ROLE_KEY", "VITE_"),
+            super::external("semgrep", "c.lang.exec", &[78], "src/net.c", 4),
+            super::external("joern", "call-to-gets", &[], "main.c", 1),
+            super::external("gcc", "x", &[99_999], "main.c", 1),
         ];
         for command in COMMANDS {
             for anyone in [true, false] {

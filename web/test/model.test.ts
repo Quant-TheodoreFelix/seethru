@@ -4,7 +4,7 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -193,8 +193,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 5 }), /version 6 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 7 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 6 }), /version 7 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 8 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -251,4 +251,17 @@ test("reads the build output limitation codes", () => {
   ];
   const codes = parseScanReport(report).target.limitations.map((limitation) => limitation.code);
   assert.deepEqual(codes, ["buildOutputStale", "buildOutputWithoutSourceMaps"]);
+});
+
+test("accepts results from an outside scanner", () => {
+  const report = validReport();
+  const [finding] = report.findings;
+  assert.ok(finding);
+  report.target.inputs = [{ type: "source" }, { type: "sarif", path: "out.sarif", engine: "semgrep", results: 1, dropped: 2 }];
+  report.findings = [{ ...finding, rule: "external", origin: { engine: "semgrep", inputs: ["sarif"], rule: "c.exec" } }];
+  const parsed = parseScanReport(report);
+  assert.deepEqual(parsed.target.inputs[1], { type: "sarif", path: "out.sarif", engine: "semgrep", results: 1, dropped: 2 });
+  assert.equal(parsed.findings[0]?.origin.rule, "c.exec");
+  report.target.inputs = [{ type: "sarif", path: "out.sarif", engine: "semgrep", results: 1, dropped: 2, url: "x" }];
+  assert.throws(() => parseScanReport(report), ReportError);
 });
