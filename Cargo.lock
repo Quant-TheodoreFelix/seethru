@@ -760,6 +760,7 @@ dependencies = [
  "seethru-fix",
  "seethru-probe",
  "seethru-report",
+ "serde_json",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ seethru-analyzer.workspace = true
 seethru-probe.workspace = true
 seethru-fix.workspace = true
 seethru-report.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
