@@ -197,7 +197,7 @@ seethru scan . --llvm-ir target/release/deps
 - With `--target` or a `build.target` setting, the files are in `target/<triple>/release/deps`.
 - seethru cannot tell whether the compiled output is older than the source. Build again after every change before you scan.
 
-- `--llvm-ir` takes a `.ll` file or a folder, which may be outside the project. For each `.ll` file, a `.s` file with the same name next to it is read as its machine code. Up to 1,024 files of 256 MB each, 1 GB in total.
+- `--llvm-ir` takes a `.ll` file or a folder, which may be outside the project. For each `.ll` file, a `.s` file with the same name next to it is read as its machine code. Up to 1,024 files of 1 GB each, 2 GB in total. Reading that much can take a few gigabytes of memory.
 - **What counts as secret.** Memory that the code wipes with a volatile write on purpose, such as a call to `zeroize()`. Values read from that memory are followed through function calls, copies and returned pointers. Memory that a type wipes by itself when it is dropped does not count, because a hash state wipes itself even when it only held public data.
 - **What is reported.** A division or remainder of such a value (`secret-dependent-division`). The time a division takes depends on its operands on most processors. With a `.s` file, the finding is `likely` when the machine code has a division instruction for that source line, and it is dropped when the compiler turned a division by a constant into a multiplication. Without one it is `review`.
 - **What is not checked yet.** Branches and table lookups that depend on a secret, and whether a wipe survives the compiler. Both were tried and gave too many wrong results to ship. The report says so every time.
@@ -213,13 +213,15 @@ seethru scan . --build
 `--build` is the only case where seethru runs anything from your project. It is off unless you pass it.
 
 - **Use it only on code you trust.** A cargo build runs the project's `build.rs` scripts and macros on your computer, and those of its dependencies. seethru cannot stop or sandbox that. For a repository you do not trust, scan without `--build`.
-- It runs `cargo build --release --locked --offline --target-dir PATH/.seethru/build` from the project root and prints that command first. The project's own settings in `.cargo/config.toml`, such as the target and compiler flags, apply as usual.
-- Nothing is downloaded. The project needs a `Cargo.lock`, and its dependencies and toolchain must already be on the computer. If something is missing the build fails instead of fetching it.
-- The output goes to `PATH/.seethru/build`. Your `target` folder is not touched. The folder can grow large. Delete it whenever you like.
+- It runs `cargo build --release --locked --offline --target-dir PATH/.seethru/build/<project>` from the folder that holds the `Cargo.toml` and prints that command first. The project's own settings in `.cargo/config.toml`, such as the target and compiler flags, apply as usual.
+- Nothing is downloaded. The project needs a `Cargo.lock`, and its dependencies and toolchain must already be on the computer. If something is missing the build fails instead of fetching it, and seethru tells you what to run yourself: `cargo generate-lockfile` for a missing lock file, `cargo fetch` for missing dependencies, `rustup toolchain install` for a missing toolchain.
+- The output goes to a folder per project under `PATH/.seethru/build`. Your `target` folder is not touched. The folder can grow large. Delete it whenever you like.
 - seethru adds the output it needs by putting itself in front of the compiler (`RUSTC_WRAPPER`) for this one build. Your own compiler flags are kept. If the project uses its own wrapper such as sccache, it is not used for this build.
 - Each run builds again, so the result always matches the source. When the build settings, dependencies or toolchain change, seethru throws the folder away and builds from scratch once.
 - If the build fails, seethru stops with an error and writes no report.
-- Only the project in `PATH` is built. It needs a `Cargo.toml` and a `Cargo.lock` in that folder, so for a workspace pass the workspace root, not a member folder.
+- A program that compiles but cannot be linked still counts, because the checks read compiled code and do not need the linked file. This is common for kernels, firmware and test programs without a `main`. seethru says so when it happens.
+- seethru builds every Cargo project it finds in `PATH` that is not inside another one, so a project in a subfolder such as `core/` or `apps/desktop/src-tauri/` works. Each needs its own `Cargo.lock`. If one of them fails, the scan stops. With more than 8 such projects, scan one folder at a time.
+- For a workspace, pass the workspace root, not a member folder.
 - Compiled output is kept only for crates whose source is inside `PATH`. Dependencies from a registry or from git are built as usual but not read, so a secret is not followed into them.
 - There is no time limit. Stop it with Ctrl-C if a build hangs.
 - `--build` and `--llvm-ir` can be used together.
