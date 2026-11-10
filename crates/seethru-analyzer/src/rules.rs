@@ -541,6 +541,121 @@ pub(crate) fn secret_in_source(kind: SecretKind, file: &str) -> Text {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryKind {
+    Route,
+    ServerAction,
+    EdgeFunction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reached<'a> {
+    ReadTable(&'a str),
+    WriteTable(&'a str),
+    ReadBucket(&'a str),
+    WriteBucket(&'a str),
+    Rpc(&'a str),
+    Admin(&'a str),
+}
+
+pub(crate) fn service_role_unguarded(
+    kind: EntryKind,
+    entry: &str,
+    reached: Reached<'_>,
+    more: usize,
+) -> Text {
+    let entry = display_name(entry);
+    let (what_en, what_ko) = match reached {
+        Reached::ReadTable(table) => {
+            let table = display_name(table);
+            (
+                format!("read rows from `{table}`"),
+                format!("`{table}` 테이블의 행을 읽어요"),
+            )
+        }
+        Reached::WriteTable(table) => {
+            let table = display_name(table);
+            (
+                format!("change rows in `{table}`"),
+                format!("`{table}` 테이블의 행을 바꿔요"),
+            )
+        }
+        Reached::ReadBucket(bucket) => {
+            let bucket = display_name(bucket);
+            (
+                format!("read files in the `{bucket}` bucket"),
+                format!("`{bucket}` 버킷의 파일을 읽어요"),
+            )
+        }
+        Reached::WriteBucket(bucket) => {
+            let bucket = display_name(bucket);
+            (
+                format!("change files in the `{bucket}` bucket"),
+                format!("`{bucket}` 버킷의 파일을 바꿔요"),
+            )
+        }
+        Reached::Rpc(function) => {
+            let function = display_name(function);
+            (
+                format!("call the `{function}` database function"),
+                format!("`{function}` 데이터베이스 함수를 불러요"),
+            )
+        }
+        Reached::Admin(method) => {
+            let method = display_name(method);
+            (
+                format!("use `auth.admin.{method}`, which manages user accounts"),
+                format!("사용자 계정을 관리하는 `auth.admin.{method}`를 써요"),
+            )
+        }
+    };
+    let (how_en, how_ko) = match kind {
+        EntryKind::Route => (
+            "Anyone who sends a request to this URL can do it.",
+            "이 URL로 요청을 보내는 사람은 누구나 이 일을 할 수 있어요.",
+        ),
+        EntryKind::ServerAction => (
+            "Anyone can call a server action with a plain POST request, even when no page shows the button.",
+            "server action은 버튼을 보여 주는 페이지가 없어도 누구나 POST 요청 하나로 부를 수 있어요.",
+        ),
+        EntryKind::EdgeFunction => (
+            "Supabase lets a request in when it carries your project's public key, so that alone does not tell who is calling. Anyone can do it.",
+            "Supabase는 요청에 프로젝트의 공개 키만 있어도 들여보내서, 그것만으로는 누가 부르는지 알 수 없어요. 누구나 이 일을 할 수 있어요.",
+        ),
+    };
+    let (more_en, more_ko) = match more {
+        0 => (String::new(), String::new()),
+        1 => (
+            " It also reaches 1 other database call made with that key.".to_owned(),
+            " 같은 키로 하는 데이터베이스 호출이 1개 더 있어요.".to_owned(),
+        ),
+        count => (
+            format!(" It also reaches {count} other database calls made with that key."),
+            format!(" 같은 키로 하는 데이터베이스 호출이 {count}개 더 있어요."),
+        ),
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("`{entry}` uses the service_role key without checking who is calling"),
+            ko: format!("`{entry}`가 누가 부르는지 확인하지 않고 service_role 키를 써요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "`{entry}` runs code that uses the Supabase service_role key, which skips Row Level Security, \
+                 to {what_en}. No check of who is calling was found before that happens. {how_en}{more_en} \
+                 Check the signed-in user first, for example with `supabase.auth.getUser()`, and stop when there is none. \
+                 If this must stay open, like a webhook, check the request's signature before touching data."
+            ),
+            ko: format!(
+                "`{entry}`는 Row Level Security를 건너뛰는 Supabase service_role 키로 {what_ko}. \
+                 그 전에 누가 부르는지 확인하는 코드를 찾지 못했어요. {how_ko}{more_ko} \
+                 `supabase.auth.getUser()` 같은 방법으로 로그인한 사용자를 먼저 확인하고, 없으면 멈추세요. \
+                 웹훅처럼 열어 둬야 한다면 데이터를 건드리기 전에 요청의 서명을 확인하세요."
+            ),
+        },
+    }
+}
+
 pub(crate) fn limitation(code: LimitationCode) -> Limitation {
     let (en, ko) = match code {
         LimitationCode::BuildOutputNotRead => (
@@ -574,10 +689,10 @@ mod tests {
     use seethru_core::{PolicyCommand, SecretKind};
 
     use super::{
-        FunctionFacts, Text, ViewFacts, display_name, function_bypasses_rls, policy_unrestricted,
-        rls_disabled, secret_in_browser, secret_in_public_env, secret_in_source,
-        service_role_in_browser, storage_policy_unrestricted, table_schema_missing,
-        view_bypasses_rls,
+        EntryKind, FunctionFacts, Reached, Text, ViewFacts, display_name, function_bypasses_rls,
+        policy_unrestricted, rls_disabled, secret_in_browser, secret_in_public_env,
+        secret_in_source, service_role_in_browser, service_role_unguarded,
+        storage_policy_unrestricted, table_schema_missing, view_bypasses_rls,
     };
 
     const SECRET_KINDS: [SecretKind; 9] = [
@@ -660,6 +775,29 @@ mod tests {
             texts.push(secret_in_browser(kind, "dist/app.js"));
             texts.push(secret_in_public_env(kind, "VITE_KEY"));
             texts.push(secret_in_source(kind, "src/pay.ts"));
+        }
+        for kind in [
+            EntryKind::Route,
+            EntryKind::ServerAction,
+            EntryKind::EdgeFunction,
+        ] {
+            for reached in [
+                Reached::ReadTable("todos"),
+                Reached::WriteTable("todos"),
+                Reached::ReadBucket("avatars"),
+                Reached::WriteBucket("avatars"),
+                Reached::Rpc("match_items"),
+                Reached::Admin("deleteUser"),
+            ] {
+                for more in [0, 1, 3] {
+                    texts.push(service_role_unguarded(
+                        kind,
+                        "DELETE /api/todos",
+                        reached,
+                        more,
+                    ));
+                }
+            }
         }
         texts
     }

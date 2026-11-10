@@ -69,6 +69,11 @@ fn supabase_vite_fixture_reports_expected_findings() {
                 "policy:storage.objects/Avatar images are public"
             ),
             (
+                RuleId::SupabaseServiceRoleUnguarded,
+                Severity::Medium,
+                "entry:httpRoute:/functions/v1/admin-report"
+            ),
+            (
                 RuleId::SupabaseFunctionBypassesRls,
                 Severity::Low,
                 "entry:rpc:public.is_note_owner"
@@ -219,10 +224,53 @@ fn supabase_next_fixture_tells_server_code_from_browser_code() {
         .collect();
     assert_eq!(
         got,
-        vec![(
-            RuleId::SupabaseServiceRoleInBrowser,
-            "env:NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"
-        )]
+        vec![
+            (
+                RuleId::SupabaseServiceRoleInBrowser,
+                "env:NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"
+            ),
+            (
+                RuleId::SupabaseServiceRoleUnguarded,
+                "entry:serverAction:src/app/actions.ts#addTodo"
+            ),
+            (
+                RuleId::SupabaseServiceRoleUnguarded,
+                "entry:httpRoute:/api/todos"
+            ),
+        ]
+    );
+    let edge = |from: &str, to: &str, kind: EdgeKind| {
+        report
+            .edges
+            .iter()
+            .any(|edge| edge.from.as_str() == from && edge.to.as_str() == to && edge.kind == kind)
+    };
+    assert!(edge(
+        "file:src/lib/admin-server.ts",
+        "principal:supabase:service_role",
+        EdgeKind::ActsAs
+    ));
+    let route = report
+        .findings
+        .iter()
+        .find(|finding| finding.node.as_str() == "entry:httpRoute:/api/todos");
+    let route_steps: Vec<(&str, Option<EdgeKind>)> = route
+        .map(|finding| {
+            finding
+                .evidence
+                .iter()
+                .map(|step| (step.label.as_str(), step.via))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        route_steps,
+        vec![
+            ("DELETE /api/todos", None),
+            ("route.ts", Some(EdgeKind::Invokes)),
+            ("service_role", Some(EdgeKind::ActsAs)),
+            ("todos", Some(EdgeKind::Writes)),
+        ]
     );
     type Step<'a> = (
         &'a str,
@@ -233,6 +281,7 @@ fn supabase_next_fixture_tells_server_code_from_browser_code() {
     let evidence: Vec<Step<'_>> = report
         .findings
         .iter()
+        .filter(|finding| finding.rule == RuleId::SupabaseServiceRoleInBrowser)
         .flat_map(|finding| &finding.evidence)
         .map(|step| {
             (

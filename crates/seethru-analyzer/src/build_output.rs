@@ -522,7 +522,7 @@ impl Sources {
     }
 }
 
-fn app_route_url(key: &str) -> String {
+pub(crate) fn app_route_url(key: &str) -> String {
     let mut segments: Vec<&str> = key
         .split('/')
         .filter(|segment| !segment.is_empty())

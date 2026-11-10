@@ -404,6 +404,12 @@ fn next_build_output_confirms_client_boundaries_and_server_files() {
             ("entry:httpRoute:/cart", "file:src/app/(shop)/cart/page.jsx"),
         ]
     );
+    let routes = report
+        .nodes
+        .iter()
+        .filter(|node| node.id.as_str().starts_with("entry:httpRoute:"))
+        .count();
+    assert_eq!(routes, 4);
     assert!(
         report
             .nodes

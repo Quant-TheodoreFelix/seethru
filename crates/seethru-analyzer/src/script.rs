@@ -5,7 +5,11 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
+use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
+
+use crate::Lines;
+use crate::trace::{self, FileFlow};
 
 pub(crate) const MAX_SCRIPT_BYTES: usize = 1024 * 1024;
 const MAX_NESTING: usize = 512;
@@ -60,7 +64,7 @@ pub(crate) struct Import {
     pub offset: usize,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub(crate) struct Facts {
     pub directive: Option<Directive>,
     pub server_only: bool,
@@ -68,6 +72,7 @@ pub(crate) struct Facts {
     pub imports: Vec<Import>,
     pub env_reads: Vec<EnvRead>,
     pub queries: Vec<TableQuery>,
+    pub flow: FileFlow,
 }
 
 pub(crate) fn is_interesting_env(name: &str) -> bool {
@@ -99,6 +104,14 @@ pub(crate) fn analyze(rel_path: &str, source: &str) -> Option<Facts> {
         }
     }
     collector.visit_program(&parsed.program);
+    let semantic = SemanticBuilder::new().build(&parsed.program);
+    let lines = Lines::new(source);
+    collector.facts.flow = trace::collect(
+        &parsed.program,
+        semantic.semantic.scoping(),
+        rel_path,
+        &lines,
+    );
     Some(collector.facts)
 }
 

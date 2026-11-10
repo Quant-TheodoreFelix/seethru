@@ -11,6 +11,7 @@ mod script;
 mod secrets;
 mod sourcemap;
 mod supabase;
+mod trace;
 mod walk;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -105,6 +106,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut secret_records = Vec::new();
     let mut configs = Vec::new();
     let mut script_paths = BTreeMap::new();
+    let mut flows = Vec::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
     let mut uses_supabase = false;
@@ -151,6 +153,12 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
                     })
                     .collect(),
             });
+            flows.push(trace::Module {
+                rel_path: entry.rel_path.clone(),
+                role: class.role,
+                directive: facts.directive,
+                flow: std::mem::take(&mut facts.flow),
+            });
             scripts.push(ScriptRecord::new(&entry.rel_path, &lines, facts));
         }
         if let Some(record) = SecretRecord::new(&entry.rel_path, class, &text) {
@@ -196,6 +204,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         let assigned = assigned_of(&record.rel_path, FileRole::UnknownCode);
         record.emit(&mut graph, &assigned);
     }
+    trace::emit(&flows, &resolver, &hints, &mut graph, &assigned_of);
     if let Some(build) = &build {
         for route in &build.routes {
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
