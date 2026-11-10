@@ -1055,8 +1055,8 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "seethru가 이 프로젝트의 종류를 알아보지 못해서 파일에 적힌 비밀 값만 찾았어요. 탐지가 없다고 안전하다는 뜻은 아니에요.",
         ),
         LimitationCode::CompiledOutputNotRead => (
-            "This is a Rust project, and only its source and Cargo files were read. Whether a secret value affects timing can only be checked in compiled output. Build with `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release` and pass the output folder with `--llvm-ir`. seethru never runs the build itself.",
-            "Rust 프로젝트인데 소스와 Cargo 파일만 읽었어요. 비밀 값이 실행 시간에 영향을 주는지는 컴파일 결과에서만 확인할 수 있어요. `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release`로 빌드한 뒤 결과 폴더를 `--llvm-ir`로 넘기세요. seethru는 빌드를 직접 실행하지 않아요.",
+            "This is a Rust project, and only its source and Cargo files were read. Whether a secret value affects timing can only be checked in compiled output. Build with `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release` and pass the output folder with `--llvm-ir`, or add `--build` to let seethru run the build on code you trust.",
+            "Rust 프로젝트인데 소스와 Cargo 파일만 읽었어요. 비밀 값이 실행 시간에 영향을 주는지는 컴파일 결과에서만 확인할 수 있어요. `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release`로 빌드한 뒤 결과 폴더를 `--llvm-ir`로 넘기세요. 믿을 수 있는 코드라면 `--build`를 붙여 seethru가 빌드하게 할 수도 있어요.",
         ),
         LimitationCode::CompiledChecksPartial => (
             "In compiled output, seethru only checks whether a secret value reaches a division. Branches and table lookups that depend on a secret, and whether memory wipes survive the compiler, are not checked yet. A value counts as secret only when the code wipes the memory it is kept in with a call written in the code, such as `zeroize()`. Memory that a type wipes by itself when it is dropped does not count. Output of a library is from before the final link, so the shipped program can differ.",

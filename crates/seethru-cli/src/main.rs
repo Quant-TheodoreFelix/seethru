@@ -1,3 +1,5 @@
+mod build;
+
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -12,7 +14,7 @@ seethru - see through your app before attackers do
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
                [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
-               [--compile-commands FILE] [--llvm-ir PATH]...
+               [--compile-commands FILE] [--llvm-ir PATH]... [--build]
   seethru schema
   seethru --version
 
@@ -38,7 +40,12 @@ Options
   --llvm-ir PATH
                Read compiled output of a Rust project from PATH, a .ll file or
                a folder with .ll files and, next to them, .s files. Can be given
-               more than once. seethru never runs the build itself
+               more than once. seethru does not run the build unless --build
+               is given
+  --build      Build a Rust project with cargo and read the compiled output.
+               This runs the project's build scripts and macros on this
+               computer, so use it only on code you trust. Nothing is
+               downloaded. The output goes to PATH/.seethru/build
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -56,6 +63,7 @@ enum Command {
         sarif_out: Option<PathBuf>,
         compile_commands: Option<PathBuf>,
         llvm_ir: Vec<PathBuf>,
+        build: bool,
     },
     Schema,
     Version,
@@ -87,6 +95,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut sarif_out: Option<PathBuf> = None;
             let mut compile_commands = None;
             let mut llvm_ir = Vec::new();
+            let mut build = false;
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
@@ -97,6 +106,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                         compile_commands = Some(PathBuf::from(parser.value()?));
                     }
                     Long("llvm-ir") => llvm_ir.push(PathBuf::from(parser.value()?)),
+                    Long("build") => build = true,
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -136,6 +146,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 sarif_out,
                 compile_commands,
                 llvm_ir,
+                build,
             })
         }
         "schema" => match parser.next()? {
@@ -150,6 +161,9 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
 }
 
 fn main() -> ExitCode {
+    if std::env::var_os(build::WRAPPER_ENV).is_some() {
+        return build::wrap(std::env::args_os().skip(1));
+    }
     let command = match parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {
@@ -196,8 +210,12 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             sarif,
             sarif_out,
             compile_commands,
-            llvm_ir,
+            mut llvm_ir,
+            build,
         } => {
+            if build {
+                llvm_ir.extend(build::build(&path, &state_dir(&path)?, lang)?);
+            }
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
@@ -234,6 +252,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn default_report_path(root: &Path) -> io::Result<PathBuf> {
+    Ok(state_dir(root)?.join(REPORT_FILE))
+}
+
+fn state_dir(root: &Path) -> io::Result<PathBuf> {
     let dir = root.join(REPORT_DIR);
     match fs::symlink_metadata(&dir) {
         Ok(meta) if meta.file_type().is_dir() => {}
@@ -249,7 +271,7 @@ fn default_report_path(root: &Path) -> io::Result<PathBuf> {
         }
         Err(error) => return Err(error),
     }
-    Ok(dir.join(REPORT_FILE))
+    Ok(dir)
 }
 
 fn write_new_file(path: &Path, content: &str) -> io::Result<()> {
@@ -444,7 +466,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir, build: false }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty()
         ));
     }
 
@@ -642,6 +664,19 @@ mod tests {
                 if llvm_ir.len() == 2 && llvm_ir[1].as_os_str() == "b.ll"
         ));
         assert!(parse(args(&["scan", "--llvm-ir"])).is_err());
+    }
+
+    #[test]
+    fn scan_builds_only_when_asked() {
+        assert!(matches!(
+            parse(args(&["scan", "app"])),
+            Ok(Command::Scan { build: false, .. })
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "app", "--build", "--llvm-ir", "a.ll"])),
+            Ok(Command::Scan { build: true, ref llvm_ir, .. }) if llvm_ir.len() == 1
+        ));
+        assert!(parse(args(&["scan", "--build=yes"])).is_err());
     }
 
     #[test]
