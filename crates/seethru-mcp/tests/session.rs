@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use seethru_core::ScanReport;
+use seethru_core::{DivisionLine, MachineCode, ScanReport};
 use seethru_mcp::{
     Host, LATEST_PROTOCOL_VERSION, MAX_LINE_BYTES, Permissions, PlainHost, ScanRequest, plain_scan,
     serve,
@@ -86,6 +86,35 @@ impl Host for Counting {
         self.scans.set(self.scans.get() + 1);
         self.last.set(Some(request.clone()));
         plain_scan(&request.root)
+    }
+}
+
+struct Listed(Counting);
+
+impl Host for Listed {
+    fn roots(&self) -> &[PathBuf] {
+        self.0.roots()
+    }
+
+    fn permissions(&self) -> &Permissions {
+        self.0.permissions()
+    }
+
+    fn scan(&self, request: &ScanRequest) -> Result<ScanReport, String> {
+        let mut report = self.0.scan(request)?;
+        report.target.machine_code = Some(MachineCode {
+            divisions: 201,
+            division_lines: (1..=201)
+                .map(|line| DivisionLine {
+                    path: "src/lib.rs".to_owned(),
+                    line,
+                    secret: false,
+                    assembly: false,
+                })
+                .collect(),
+            ..MachineCode::default()
+        });
+        Ok(report)
     }
 }
 
@@ -212,6 +241,7 @@ fn a_whole_session_scans_and_explains_a_finding() {
     assert_eq!(structured["findingsTotal"], findings.len());
     assert_eq!(structured["findingsCapped"], false);
     assert_eq!(structured["ran"], json!({ "build": false, "tools": [] }));
+    assert!(structured.get("machineCode").is_none(), "{structured}");
     let root_text = temp.root.display().to_string();
     let listed = structured["findings"].to_string() + &structured["limitations"].to_string();
     assert!(!listed.contains(&root_text));
@@ -255,6 +285,23 @@ fn a_whole_session_scans_and_explains_a_finding() {
     );
     assert!(second[3]["result"]["structuredContent"]["limitations"].is_array());
     assert!(is_tool_error(&second[4]));
+}
+
+#[test]
+fn a_long_machine_code_list_is_cut_and_the_cut_is_said() {
+    let temp = Temp::with_fixture("machine-list");
+    let host = Listed(Counting::new(&temp.root, Permissions::default()));
+    let replies = run(
+        &host,
+        &[
+            initialize(LATEST_PROTOCOL_VERSION),
+            call(1, "scan", json!({ "path": "app" })),
+        ],
+    );
+    let machine = &replies[1]["result"]["structuredContent"]["machineCode"];
+    assert_eq!(machine["divisions"], 201, "{}", replies[1]);
+    assert_eq!(machine["linesCapped"], true);
+    assert_eq!(machine["divisionLines"].as_array().map(Vec::len), Some(200));
 }
 
 #[test]

@@ -147,7 +147,14 @@ fn a_permitted_build_and_tools_find_the_removed_wipe_over_mcp()
         "{text}"
     );
     let body: Value = serde_json::from_str(text)?;
-    let listed = format!("{}{}", body["findings"], body["limitations"]);
+    let listed = format!(
+        "{}{}{}",
+        body["findings"], body["limitations"], body["machineCode"]
+    );
     assert!(!listed.contains(&root), "{listed}");
+    let machine = &body["machineCode"];
+    assert!(machine["divisions"].is_u64(), "{machine}");
+    assert!(machine["divisionLines"].is_array(), "{machine}");
+    assert_eq!(machine["linesCapped"], false, "{machine}");
     Ok(())
 }
