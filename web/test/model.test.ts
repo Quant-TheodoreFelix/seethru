@@ -5,6 +5,7 @@ import {
   ReportError,
   edgeKindsIn,
   findingsIn,
+  isSeverity,
   parseScanReport,
   viewCount,
   viewOf,
@@ -13,7 +14,7 @@ import {
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -202,8 +203,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 10 }), /version 11 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 12 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 11 }), /version 12 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 13 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -368,6 +369,67 @@ test("groups findings by the count they are shown under", () => {
   assert.equal(viewOf(report.findings[1]!), "accepted");
   assert.deepEqual(
     LIST_VIEWS.map((view) => viewCount(report, view)),
-    [1, 0, 0, 0, 0, 1, 1],
+    [1, 0, 0, 0, 0, 1, 1, 0],
   );
+});
+
+function machineCodeInput() {
+  return {
+    divisions: 3,
+    divisionsWithoutLine: 1,
+    divisionLines: [
+      { path: "src/a.rs", line: 4, secret: true, assembly: false },
+      { path: "src/b.rs", line: 9, secret: false, assembly: true },
+    ],
+    assemblyBlocks: 2,
+    assemblyBlocksWithoutLine: 1,
+    assemblyLines: [{ path: "src/b.rs", line: 8, divides: true, branches: false, secret: true }],
+  };
+}
+
+test("reads machine code and counts its lines as one view", () => {
+  const input = validReport();
+  (input.target as Record<string, unknown>).machineCode = machineCodeInput();
+  const report = parseScanReport(input);
+  assert.equal(report.target.machineCode?.divisionLines.length, 2);
+  assert.equal(report.target.machineCode?.assemblyLines[0]?.divides, true);
+  assert.equal(viewCount(report, "machineCode"), 3);
+  assert.equal(isSeverity("machineCode"), false);
+  assert.ok(LIST_VIEWS.includes("machineCode"));
+});
+
+test("keeps machine code absent when the report has none", () => {
+  const report = parseScanReport(validReport());
+  assert.equal(report.target.machineCode, undefined);
+  assert.equal("machineCode" in report.target, false);
+  assert.equal(viewCount(report, "machineCode"), 0);
+});
+
+test("rejects unknown keys and bad counts in machine code", () => {
+  const withMachine = (change: (machine: ReturnType<typeof machineCodeInput>) => void) => {
+    const input = validReport();
+    const machine = machineCodeInput();
+    change(machine);
+    (input.target as Record<string, unknown>).machineCode = machine;
+    return input;
+  };
+  const cases: Array<(machine: ReturnType<typeof machineCodeInput>) => void> = [
+    (machine) => Object.assign(machine, { extra: 1 }),
+    (machine) => Object.assign(machine.divisionLines[0]!, { extra: 1 }),
+    (machine) => Object.assign(machine.assemblyLines[0]!, { extra: 1 }),
+    (machine) => (machine.divisions = -1),
+    (machine) => (machine.divisionsWithoutLine = 1.5),
+    (machine) => (machine.assemblyBlocks = -2),
+    (machine) => (machine.divisionLines[0]!.line = 2.5),
+    (machine) => Reflect.deleteProperty(machine, "assemblyLines"),
+  ];
+  for (const change of cases) assert.throws(() => parseScanReport(withMachine(change)), ReportError);
+});
+
+test("accepts the new assembly limitation codes", () => {
+  const report = validReport();
+  for (const code of ["machineCodeProcessorNotKnown", "assemblyOutsideFunctionsNotRead"]) {
+    (report.target as Record<string, unknown>).limitations = [{ code, text: { en: "l", ko: "한계" } }];
+    assert.equal(parseScanReport(report).target.limitations[0]?.code, code);
+  }
 });

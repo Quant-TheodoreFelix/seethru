@@ -27,6 +27,7 @@ import {
   type EdgeKind,
   type Finding,
   type ListView,
+  type MachineCode,
   type ReportNode,
   type ScanReport,
   type Severity,
@@ -276,7 +277,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   const focus = useCallback(
     (finding: Finding) => {
       setSelectedId(finding.id);
-      setView((current) => (current ? viewOf(finding) : current));
+      setView((current) => (current && current !== "machineCode" ? viewOf(finding) : current));
       const path = new Set<string>([finding.node]);
       for (const step of finding.evidence) if (step.node) path.add(step.node);
       setNodes((current) => current.map((node) => ({ ...node, selected: path.has(node.id) })));
@@ -296,7 +297,7 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
   }, []);
 
   const viewTitle = (item: ListView) =>
-    isSeverity(item) ? m.severity[item] : item === "accepted" ? m.acceptedTitle : m.limitations;
+    isSeverity(item) ? m.severity[item] : item === "accepted" ? m.acceptedTitle : item === "limitations" ? m.limitations : m.machineCodeTitle;
 
   return (
     <div className="workspace">
@@ -332,7 +333,14 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
               </button>
             </div>
             <div ref={list}>
-              {view === "limitations" ? (
+              {view === "machineCode" && report.target.machineCode ? (
+                <MachineCodeList
+                  machine={report.target.machineCode}
+                  findings={report.findings}
+                  selectedId={selectedId}
+                  onSelect={focus}
+                />
+              ) : view === "limitations" ? (
                 <ul className="limitations">
                   {report.target.limitations.map((limitation) => (
                     <li key={limitation.code}>
@@ -450,6 +458,102 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
           </AnimatePresence>
         </main>
       </div>
+    </div>
+  );
+}
+
+function MachineCodeList({
+  machine,
+  findings,
+  selectedId,
+  onSelect,
+}: {
+  machine: MachineCode;
+  findings: Finding[];
+  selectedId: string | undefined;
+  onSelect: (finding: Finding) => void;
+}) {
+  const m = useMessages();
+  const findingAt = (path: string, line: number) =>
+    findings.find(
+      (item) => item.rule === "secret-dependent-division" && item.location?.path === path && item.location.line === line,
+    );
+  const assemblyLines = [
+    ...machine.assemblyLines.filter((item) => item.divides || item.branches),
+    ...machine.assemblyLines.filter((item) => !item.divides && !item.branches),
+  ];
+  return (
+    <div className="machine">
+      <p className="machine-note">{m.machineCodeNote}</p>
+      <section>
+        <h3>{m.divisionTitle}</h3>
+        <p className="machine-summary">
+          {machine.divisions === 0 ? m.divisionNone : m.divisionSummary(machine.divisions, machine.divisionLines.length)}
+        </p>
+        {machine.divisionsWithoutLine > 0 ? (
+          <p className="machine-summary">{m.divisionUnmatched(machine.divisionsWithoutLine)}</p>
+        ) : null}
+        <ul className="machine-rows">
+          {machine.divisionLines.map((item) => {
+            const found = item.secret ? findingAt(item.path, item.line) : undefined;
+            const body = (
+              <>
+                <span className="finding-where">
+                  {item.path}:{item.line}
+                </span>
+                <span className="machine-tags">
+                  <span className={`machine-tag ${item.secret ? "is-finding" : ""}`}>
+                    {item.secret ? m.tagFinding : m.tagNotSecret}
+                  </span>
+                  {item.assembly ? <span className="machine-tag">{m.tagAssembly}</span> : null}
+                </span>
+              </>
+            );
+            return (
+              <li key={`${item.path}:${item.line}`}>
+                {found ? (
+                  <button
+                    type="button"
+                    className={`finding machine-row ${found.id === selectedId ? "is-active" : ""}`}
+                    aria-current={found.id === selectedId ? "true" : undefined}
+                    onClick={() => onSelect(found)}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div className="machine-row">{body}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+      {machine.assemblyBlocks > 0 ? (
+        <section>
+          <h3>{m.assemblyTitle}</h3>
+          <p className="machine-summary">{m.assemblySummary(machine.assemblyBlocks, machine.assemblyLines.length)}</p>
+          {machine.assemblyBlocksWithoutLine > 0 ? (
+            <p className="machine-summary">{m.assemblyUnmatched(machine.assemblyBlocksWithoutLine)}</p>
+          ) : null}
+          <ul className="machine-rows">
+            {assemblyLines.map((item) => (
+              <li key={`${item.path}:${item.line}`}>
+                <div className="machine-row">
+                  <span className="finding-where">
+                    {item.path}:{item.line}
+                  </span>
+                  <span className="machine-tags">
+                    {item.divides ? <span className="machine-tag">{m.tagDivision}</span> : null}
+                    {item.branches ? <span className="machine-tag">{m.tagBranch}</span> : null}
+                    {item.secret ? <span className="machine-tag">{m.tagTakesSecret}</span> : null}
+                    {!item.divides && !item.branches ? <span className="machine-plain">{m.assemblyPlain}</span> : null}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

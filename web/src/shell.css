@@ -234,6 +234,74 @@
   list-style: none;
 }
 
+.machine {
+  display: grid;
+  gap: 20px;
+}
+
+.machine section {
+  display: grid;
+  gap: 8px;
+}
+
+.machine h3 {
+  margin: 0;
+  padding: 0 var(--gutter);
+  font-size: 16px;
+}
+
+.machine-note,
+.machine-summary {
+  margin: 0;
+  padding: 0 var(--gutter);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.machine-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.machine-row {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px var(--gutter);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.machine-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.machine-tag,
+.machine-plain {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.machine-tag {
+  padding: 2px 8px;
+  background: var(--hover);
+}
+
+.machine-tag.is-finding {
+  color: var(--ink);
+}
+
+.finding.is-active .machine-tag,
+.finding.is-active .machine-plain {
+  color: inherit;
+  background: transparent;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(var(--cells, 5), minmax(0, 1fr));

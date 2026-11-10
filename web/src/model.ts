@@ -100,7 +100,7 @@ export type TargetInput =
   | { type: "binary"; path: string; format: BinaryFormat; tools: ToolUse[]; lines: number }
   | { type: "probe"; environment: ProbeEnvironment; tools: ToolUse[]; requests: number };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound", "binaryToolNotPermitted", "binaryToolFailed", "binaryNotFound", "binaryWithoutLineInfo", "binaryWipesNotConfirmed", "binaryChecksPartial", "probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeStoppedBySeethru", "probeRedirectedOutside", "probePageNotRead", "probeChecksPartial"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound", "machineCodeProcessorNotKnown", "assemblyOutsideFunctionsNotRead", "binaryToolNotPermitted", "binaryToolFailed", "binaryNotFound", "binaryWithoutLineInfo", "binaryWipesNotConfirmed", "binaryChecksPartial", "probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeStoppedBySeethru", "probeRedirectedOutside", "probePageNotRead", "probeChecksPartial"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -186,7 +186,31 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 11;
+export interface DivisionLine {
+  path: string;
+  line: number;
+  secret: boolean;
+  assembly: boolean;
+}
+
+export interface AssemblyLine {
+  path: string;
+  line: number;
+  divides: boolean;
+  branches: boolean;
+  secret: boolean;
+}
+
+export interface MachineCode {
+  divisions: number;
+  divisionsWithoutLine: number;
+  divisionLines: DivisionLine[];
+  assemblyBlocks: number;
+  assemblyBlocksWithoutLine: number;
+  assemblyLines: AssemblyLine[];
+}
+
+export const SCHEMA_VERSION = 12;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -201,6 +225,7 @@ export interface ScanReport {
     ecosystems: Ecosystem[];
     inputs: TargetInput[];
     limitations: Limitation[];
+    machineCode?: MachineCode;
   };
   summary: Record<Severity, number> & { accepted: number };
   nodes: ReportNode[];
@@ -216,6 +241,7 @@ const MAX_ROLES = 64;
 const MAX_STEPS = 64;
 const MAX_CWE = 16;
 const MAX_LIST = 64;
+const MAX_LINES = 500;
 
 export class ReportError extends Error {
   override name = "ReportError";
@@ -339,6 +365,44 @@ function credentialDetail(value: unknown, path: string): CredentialDetail {
   };
 }
 
+function machineCode(value: unknown, path: string): MachineCode {
+  const o = object(value, path, [
+    "divisions",
+    "divisionsWithoutLine",
+    "divisionLines",
+    "assemblyBlocks",
+    "assemblyBlocksWithoutLine",
+    "assemblyLines",
+  ]);
+  return {
+    divisions: count(o.divisions, `${path}.divisions`),
+    divisionsWithoutLine: count(o.divisionsWithoutLine, `${path}.divisionsWithoutLine`),
+    divisionLines: list(o.divisionLines, `${path}.divisionLines`, MAX_LINES).map((entry, i): DivisionLine => {
+      const linePath = `${path}.divisionLines[${i}]`;
+      const l = object(entry, linePath, ["path", "line", "secret", "assembly"]);
+      return {
+        path: text(l.path, `${linePath}.path`),
+        line: count(l.line, `${linePath}.line`),
+        secret: flag(l.secret, `${linePath}.secret`),
+        assembly: flag(l.assembly, `${linePath}.assembly`),
+      };
+    }),
+    assemblyBlocks: count(o.assemblyBlocks, `${path}.assemblyBlocks`),
+    assemblyBlocksWithoutLine: count(o.assemblyBlocksWithoutLine, `${path}.assemblyBlocksWithoutLine`),
+    assemblyLines: list(o.assemblyLines, `${path}.assemblyLines`, MAX_LINES).map((entry, i): AssemblyLine => {
+      const linePath = `${path}.assemblyLines[${i}]`;
+      const l = object(entry, linePath, ["path", "line", "divides", "branches", "secret"]);
+      return {
+        path: text(l.path, `${linePath}.path`),
+        line: count(l.line, `${linePath}.line`),
+        divides: flag(l.divides, `${linePath}.divides`),
+        branches: flag(l.branches, `${linePath}.branches`),
+        secret: flag(l.secret, `${linePath}.secret`),
+      };
+    }),
+  };
+}
+
 function nodeKind(value: unknown, path: string): NodeKind {
   switch (tagOf(value, path)) {
     case "component": {
@@ -404,6 +468,7 @@ export function parseScanReport(input: unknown): ScanReport {
     "ecosystems",
     "inputs",
     "limitations",
+    "machineCode",
   ]);
   const summary = object(root.summary, "report.summary", [...SEVERITIES, "accepted"]);
 
@@ -574,6 +639,7 @@ export function parseScanReport(input: unknown): ScanReport {
         const o = object(value, path, ["code", "text"]);
         return { code: oneOf(o.code, `${path}.code`, LIMITATION_CODES), text: localized(o.text, `${path}.text`) };
       }),
+      ...(target.machineCode === undefined ? {} : { machineCode: machineCode(target.machineCode, "report.target.machineCode") }),
     },
     summary: {
       critical: count(summary.critical, "report.summary.critical"),
@@ -604,11 +670,11 @@ export function edgeKindsIn(report: Pick<ScanReport, "edges">): EdgeKind[] {
   return EDGE_KINDS.filter((kind) => present.has(kind));
 }
 
-export const LIST_VIEWS = [...SEVERITIES, "accepted", "limitations"] as const;
+export const LIST_VIEWS = [...SEVERITIES, "accepted", "limitations", "machineCode"] as const;
 export type ListView = (typeof LIST_VIEWS)[number];
 
 export function isSeverity(view: ListView): view is Severity {
-  return view !== "accepted" && view !== "limitations";
+  return view !== "accepted" && view !== "limitations" && view !== "machineCode";
 }
 
 export function viewOf(finding: Pick<Finding, "severity" | "accepted">): ListView {
@@ -620,5 +686,10 @@ export function findingsIn(report: Pick<ScanReport, "findings">, view: ListView)
 }
 
 export function viewCount(report: Pick<ScanReport, "summary" | "target">, view: ListView): number {
-  return view === "limitations" ? report.target.limitations.length : report.summary[view];
+  if (view === "limitations") return report.target.limitations.length;
+  if (view === "machineCode") {
+    const machine = report.target.machineCode;
+    return machine ? machine.divisionLines.length + machine.assemblyLines.length : 0;
+  }
+  return report.summary[view];
 }

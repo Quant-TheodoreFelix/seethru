@@ -82,6 +82,22 @@ export interface Messages {
   proofFile: string;
   evidence: string;
   limitations: string;
+  machineCodeTitle: string;
+  machineCodeNote: string;
+  divisionTitle: string;
+  divisionSummary: (divisions: number, lines: number) => string;
+  divisionNone: string;
+  divisionUnmatched: (count: number) => string;
+  tagFinding: string;
+  tagNotSecret: string;
+  tagAssembly: string;
+  assemblyTitle: string;
+  assemblySummary: (blocks: number, lines: number) => string;
+  assemblyUnmatched: (count: number) => string;
+  tagDivision: string;
+  tagBranch: string;
+  tagTakesSecret: string;
+  assemblyPlain: string;
 }
 
 const LANGUAGE: Record<Lang, string> = { en: "EN", ko: "KO" };
@@ -232,6 +248,27 @@ const en: Messages = {
   proofFile: "Proof file",
   evidence: "How it gets there",
   limitations: "Not checked",
+  machineCodeTitle: "Machine code",
+  machineCodeNote:
+    "A line marked not tied to a secret is one seethru could not connect to a secret. That is not proof the value is public.",
+  divisionTitle: "Division instructions",
+  divisionSummary: (divisions, lines) =>
+    `The machine code has ${divisions} division ${divisions === 1 ? "instruction" : "instructions"}. ${lines} ${lines === 1 ? "line" : "lines"} of this project ${lines === 1 ? "has" : "have"} one.`,
+  divisionNone: "The machine code has no division instruction.",
+  divisionUnmatched: (count) =>
+    `${count} ${count === 1 ? "instruction" : "instructions"} could not be matched to a line of this project.`,
+  tagFinding: "Finding",
+  tagNotSecret: "Not tied to a secret",
+  tagAssembly: "Hand-written assembly",
+  assemblyTitle: "Hand-written assembly",
+  assemblySummary: (blocks, lines) =>
+    `The machine code has ${blocks} hand-written ${blocks === 1 ? "block" : "blocks"}. ${lines} ${lines === 1 ? "line" : "lines"} of this project ${lines === 1 ? "has" : "have"} one.`,
+  assemblyUnmatched: (count) =>
+    `${count} ${count === 1 ? "block" : "blocks"} could not be matched to a line of this project.`,
+  tagDivision: "Division",
+  tagBranch: "Conditional jump",
+  tagTakesSecret: "Takes a secret",
+  assemblyPlain: "No division or conditional jump",
 };
 
 const ko: Messages = {
@@ -377,6 +414,22 @@ const ko: Messages = {
   proofFile: "증거 파일",
   evidence: "어떻게 닿는지",
   limitations: "확인하지 못한 것",
+  machineCodeTitle: "기계어",
+  machineCodeNote: "'비밀과 잇지 못함'은 seethru가 비밀과 연결하지 못했다는 뜻이에요. 공개 값이라는 증명은 아니에요.",
+  divisionTitle: "나눗셈 명령",
+  divisionSummary: (divisions, lines) => `기계어에 나눗셈 명령이 ${divisions}개 있어요. 이 프로젝트의 ${lines}개 줄에 있어요.`,
+  divisionNone: "기계어에 나눗셈 명령이 없어요.",
+  divisionUnmatched: (count) => `명령 ${count}개는 이 프로젝트의 줄과 맞추지 못했어요.`,
+  tagFinding: "탐지",
+  tagNotSecret: "비밀과 잇지 못함",
+  tagAssembly: "직접 쓴 어셈블리",
+  assemblyTitle: "직접 쓴 어셈블리",
+  assemblySummary: (blocks, lines) => `기계어에 직접 쓴 블록이 ${blocks}개 있어요. 이 프로젝트의 ${lines}개 줄에 있어요.`,
+  assemblyUnmatched: (count) => `블록 ${count}개는 이 프로젝트의 줄과 맞추지 못했어요.`,
+  tagDivision: "나눗셈",
+  tagBranch: "조건 분기",
+  tagTakesSecret: "비밀 값이 들어감",
+  assemblyPlain: "나눗셈과 조건 분기 없음",
 };
 
 export const MESSAGES: Record<Lang, Messages> = { en, ko };
