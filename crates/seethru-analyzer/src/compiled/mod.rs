@@ -55,6 +55,7 @@ pub(crate) struct Compiled {
 struct Unit {
     module: ir::Module,
     listing: Option<asm::Listing>,
+    matched: bool,
 }
 
 pub(crate) fn read(
@@ -103,11 +104,21 @@ pub(crate) fn read(
             let listing = read_bytes(&file.with_extension("s"), MAX_FILE_BYTES.min(budget))
                 .map(|bytes| {
                     budget = budget.saturating_sub(bytes.len() as u64);
-                    asm::parse(&String::from_utf8_lossy(&bytes))
+                    asm::parse(&String::from_utf8_lossy(&bytes), module.naming)
                 })
                 .filter(|listing| listing.has_lines || module.functions.is_empty());
             with_machine_code += usize::from(listing.is_some());
-            units.push(Unit { module, listing });
+            let matched = listing.as_ref().is_some_and(|listing| {
+                module
+                    .functions
+                    .iter()
+                    .any(|function| listing.functions.contains(&function.symbol))
+            });
+            units.push(Unit {
+                module,
+                listing,
+                matched,
+            });
         }
         let count = units.len() - before;
         inputs.push(Input::CompiledOutput {
@@ -145,11 +156,16 @@ pub(crate) fn read(
         let Some(inner) = frames.first() else {
             continue;
         };
-        let confirmed = units[site.module].listing.as_ref().map(|listing| {
-            listing
-                .divisions
-                .contains(&(inner.path.clone(), inner.line))
-        });
+        let unit = &units[site.module];
+        let function = module
+            .functions
+            .get(site.function)
+            .filter(|_| unit.matched)
+            .map(|function| function.symbol.as_str());
+        let confirmed = unit
+            .listing
+            .as_ref()
+            .map(|listing| listing.divides(function, &inner.path, inner.line));
         if confirmed == Some(false) && !site.by_variable {
             continue;
         }

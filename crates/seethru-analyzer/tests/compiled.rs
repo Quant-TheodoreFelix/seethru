@@ -238,6 +238,108 @@ fn machine_code_confirms_a_division_or_shows_the_compiler_removed_it() {
     assert_eq!(codes(&report), [LimitationCode::CompiledChecksPartial]);
 }
 
+const SHARED_LINE: &str = r#"SEALED {
+start:
+  %v = load i32, ptr %key, align 4, !dbg !8
+  %r = urem i32 %v, 3329, !dbg !8
+  store volatile i32 0, ptr %key, align 4, !dbg !9
+  ret i32 %r, !dbg !9
+}
+
+OPEN {
+start:
+  %v = load i32, ptr %public, align 4, !dbg !11
+  %r = urem i32 %v, %m, !dbg !11
+  ret i32 %r, !dbg !11
+}
+
+!1 = !DIFile(filename: "src/lib.rs", directory: "")
+!4 = distinct !DISubprogram(name: "sealed", file: !1, line: 4)
+!5 = distinct !DISubprogram(name: "open", file: !1, line: 8)
+!6 = distinct !DISubprogram(name: "shared", file: !1, line: 1)
+!7 = !DILocation(line: 5, column: 5, scope: !4)
+!8 = !DILocation(line: 2, column: 5, scope: !6, inlinedAt: !7)
+!9 = !DILocation(line: 6, column: 5, scope: !4)
+!10 = !DILocation(line: 9, column: 5, scope: !5)
+!11 = !DILocation(line: 2, column: 5, scope: !6, inlinedAt: !10)
+"#;
+
+fn shared_line(layout: &str, sealed: &str, open: &str) -> String {
+    let unit = SHARED_LINE
+        .replace("SEALED", &format!("define i32 @{sealed}(ptr %key) !dbg !4"))
+        .replace(
+            "OPEN",
+            &format!("define i32 @{open}(ptr %public, i32 %m) !dbg !5"),
+        );
+    format!("target datalayout = \"{layout}\"\n\n{unit}")
+}
+
+fn scan_shared_line(name: &str, unit: &str, listing: &str) -> Vec<(String, u32, Confidence)> {
+    let project = project(name);
+    project.write("out/unit.ll", unit);
+    project.write("out/unit.s", listing);
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    result.map(|report| divisions(&report)).unwrap_or_default()
+}
+
+#[test]
+fn a_division_instruction_in_another_function_does_not_confirm_this_one() {
+    let unit = shared_line("e-m:e-i64:64", "sealed", "open");
+    let listing = "\t.file\t1 \"src/lib.rs\"\n\t.type\tsealed,@function\nsealed:\n.Lfunc_begin0:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\n\t.type\topen,@function\nopen:\n.Lfunc_begin1:\n\t.loc\t1 2 5\n.LBB1_1:\n\tudiv\tw0, w0, w1\n\tret\n";
+    assert_eq!(scan_shared_line("compiled-shared-line", &unit, listing), []);
+
+    let kept = listing.replace("umull\tx0, w0, w1", "udiv\tw0, w0, w1");
+    assert_eq!(
+        scan_shared_line("compiled-shared-line-kept", &unit, &kept),
+        [("src/lib.rs".to_owned(), 2, Confidence::Likely)]
+    );
+
+    let by_variable = unit.replace("urem i32 %v, 3329", "urem i32 %v, %v");
+    assert_eq!(
+        scan_shared_line("compiled-shared-line-variable", &by_variable, listing),
+        [("src/lib.rs".to_owned(), 2, Confidence::Review)]
+    );
+}
+
+#[test]
+fn functions_are_matched_across_naming_styles_of_the_machine_code() {
+    let mach_o = shared_line("e-m:o-i64:64-i128:128-n32:64-S128-Fn32", "sealed", "open");
+    let listing = "\t.file\t1 \"src/lib.rs\"\n\t.globl\t_sealed\n_sealed:\nLfunc_begin0:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\n\t.globl\t_open\n_open:\nLfunc_begin1:\n\t.loc\t1 2 5\nLBB1_1:\n\tudiv\tw0, w0, w1\nltmp3:\n\tret\n";
+    assert_eq!(
+        scan_shared_line("compiled-names-mach-o", &mach_o, listing),
+        []
+    );
+
+    let mangled = shared_line(
+        "e-m:e-i64:64",
+        "\"_ZN4unit21Seal$LT$T$GT$6sealed17h0E\"",
+        "\"_ZN4unit4open17h1E\"",
+    );
+    let listing = "\t.file\t1 \"src/lib.rs\"\n_ZN4unit21Seal$LT$T$GT$6sealed17h0E:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\n\"_ZN4unit4open17h1E\":\n\t.loc\t1 2 5\n\tudiv\tw0, w0, w1\n\tret\n";
+    assert_eq!(
+        scan_shared_line("compiled-names-mangled", &mangled, listing),
+        []
+    );
+
+    let quoted = "\t.file\t1 \"src/lib.rs\"\n\"_ZN4unit21Seal$LT$T$GT$6sealed17h0E\":\n\t.loc\t1 2 5\n\tudiv\tw0, w0, w1\n\tret\n_ZN4unit4open17h1E:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\n";
+    assert_eq!(
+        scan_shared_line("compiled-names-quoted", &mangled, quoted),
+        [("src/lib.rs".to_owned(), 2, Confidence::Likely)]
+    );
+}
+
+#[test]
+fn machine_code_with_unknown_function_names_is_still_matched_by_line() {
+    let unit = shared_line("e-m:e-i64:64", "sealed", "open");
+    let listing = "\t.file\t1 \"src/lib.rs\"\nfirst$entry:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\nsecond$entry:\n\t.loc\t1 2 5\n\tudiv\tw0, w0, w1\n\tret\n";
+    assert_eq!(
+        scan_shared_line("compiled-names-unknown", &unit, listing),
+        [("src/lib.rs".to_owned(), 2, Confidence::Likely)]
+    );
+}
+
 #[test]
 fn output_that_points_outside_the_project_is_left_out() {
     let project = project("compiled-outside");

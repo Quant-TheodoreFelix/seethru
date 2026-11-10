@@ -1,4 +1,4 @@
-use super::asm;
+use super::asm::{self, Naming};
 use super::ir::{self, Callee, Op};
 
 const TEXT: &str = r#"define { ptr, i64 } @"_ZN4demo$LT$T$GT$4pick17h0E"(ptr noundef %base, i64 range(i64 0, 9) %at) unnamed_addr #3 !dbg !4 {
@@ -72,12 +72,44 @@ fn reads_functions_calls_and_debug_places() {
 fn reads_division_instructions_with_their_source_lines() {
     let listing = asm::parse(
         "\t.file\t1 \"/work\" \"src/a.rs\"\n\t.file\t2 \"/rust/core/num.rs\"\nf:\n\t.loc\t1 7 3 prologue_end\n\tudiv\tw0, w0, w1\n\t.loc\t2 90 1\n\tbl\t__aeabi_uidivmod\n\t.loc\t1 8 1\n\tdivss\t%xmm0, %xmm1\n\tmul\tx0, x0, x1\n",
+        Naming::Plain,
     );
     assert!(listing.has_lines);
-    let found: Vec<(&str, u32)> = listing
+    let found: Vec<(Option<&str>, &str, u32)> = listing
         .divisions
         .iter()
-        .map(|(path, line)| (path.as_str(), *line))
+        .map(|spot| (spot.function.as_deref(), spot.path.as_str(), spot.line))
         .collect();
-    assert_eq!(found, [("/rust/core/num.rs", 90), ("/work/src/a.rs", 7)]);
+    assert_eq!(
+        found,
+        [
+            (Some("f"), "/rust/core/num.rs", 90),
+            (Some("f"), "/work/src/a.rs", 7)
+        ]
+    );
+}
+
+#[test]
+fn records_the_function_each_division_instruction_is_in() {
+    let text = "\t.file\t1 \"/work\" \"src/a.rs\"\n\t.globl\t_first\n_first:\nLfunc_begin0:\n\t.loc\t1 3 1\nLBB0_2:\n\tudiv\tw0, w0, w1\nltmp4:\n\tsdiv\tw0, w0, w1\n\t; InlineAsm Start\nretry:\n\tudiv\tw2, w2, w3\n\t; InlineAsm End\n_second:\n\tudiv\tw0, w0, w1\n\t.loc\t1 0 0\n\tudiv\tw0, w0, w1\n\t.loc\t1 9 1\n\tudiv\tw0, w0, w1\n";
+    let listing = asm::parse(text, Naming::of("\"e-m:o-i64:64\""));
+    let functions: Vec<&str> = listing.functions.iter().map(String::as_str).collect();
+    assert_eq!(functions, ["first", "second"]);
+    let found: Vec<(Option<&str>, u32)> = listing
+        .divisions
+        .iter()
+        .map(|spot| (spot.function.as_deref(), spot.line))
+        .collect();
+    assert_eq!(found, [(Some("first"), 3), (Some("second"), 9)]);
+    assert!(listing.divides(Some("first"), "/work/src/a.rs", 3));
+    assert!(!listing.divides(Some("second"), "/work/src/a.rs", 3));
+    assert!(listing.divides(None, "/work/src/a.rs", 9));
+
+    let elf = asm::parse(
+        "\t.file\t1 \"src/a.rs\"\nLoad:\n\t.loc\t1 3 1\n.Ltmp0:\n\tdivl\t%ecx\n$local:\n\tdivl\t%ecx\n",
+        Naming::of("\"e-m:e-p270:32:32\""),
+    );
+    let functions: Vec<&str> = elf.functions.iter().map(String::as_str).collect();
+    assert_eq!(functions, ["Load"]);
+    assert_eq!(elf.divisions.len(), 1);
 }

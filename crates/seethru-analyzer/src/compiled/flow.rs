@@ -46,6 +46,7 @@ fn pointee_label(param: usize) -> Labels {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Site {
     pub module: usize,
+    pub function: usize,
     pub debug: u32,
     pub by_variable: bool,
 }
@@ -335,7 +336,9 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
     let mut anywhere: HashMap<&str, usize> = HashMap::new();
     let mut nearby: HashMap<(usize, &str), usize> = HashMap::new();
     let mut functions: Vec<(usize, &Function)> = Vec::new();
+    let mut firsts: Vec<usize> = Vec::new();
     for (module_at, module) in modules.iter().enumerate() {
+        firsts.push(functions.len());
         for function in &module.functions {
             let symbol = function.symbol.as_str();
             anywhere.entry(symbol).or_insert(functions.len());
@@ -518,6 +521,7 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
             {
                 sites.push(Site {
                     module: *module_at,
+                    function: at - firsts[*module_at],
                     debug,
                     by_variable: *by_variable,
                 });

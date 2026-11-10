@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use super::asm::Naming;
+
 pub(crate) type Value = u32;
 
 const MAX_LINE_BYTES: usize = 64 * 1024;
@@ -99,6 +101,7 @@ struct Scope {
 pub(crate) struct Module {
     pub functions: Vec<Function>,
     pub truncated: bool,
+    pub naming: Naming,
     places: HashMap<u32, Place>,
     scopes: HashMap<u32, Scope>,
     files: HashMap<u32, String>,
@@ -403,6 +406,8 @@ pub(crate) fn parse(text: &str) -> Module {
                 continue;
             }
             metadata(line, &mut module);
+        } else if let Some(layout) = line.strip_prefix("target datalayout = ") {
+            module.naming = Naming::of(layout);
         } else if let Some(rest) = line.strip_prefix("attributes #")
             && let Some(id) = number_after(line, "attributes #")
         {
