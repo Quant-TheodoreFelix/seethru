@@ -38,6 +38,7 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | `--build-output DIR` | `DIR`에 있는 Vite 또는 Next 빌드 결과물을 읽습니다. 프로젝트 안의 폴더여야 합니다 |
 | `--sarif FILE`       | 다른 검사 도구가 SARIF 2.1.0으로 `FILE`에 쓴 결과를 함께 보여 줍니다. 최대 8개    |
 | `--sarif-out FILE`   | seethru가 찾은 것을 SARIF 2.1.0으로 `FILE`에도 저장합니다                         |
+| `--compile-commands FILE` | 프로젝트 안의 `compile_commands.json`을 읽어 어떤 C, C++ 파일이 빌드되는지 확인합니다 |
 
 
 | 탐지 항목              | 설명                                                                            |
@@ -49,6 +50,8 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | service_role 키 노출  | 브라우저 코드가 공개 환경변수로 service_role 키를 읽는 경우                                       |
 | 확인 없는 service_role | 누가 부르는지 확인하지 않고 service_role 키를 쓰는 코드에 닿는 route, server action, Edge Function |
 | 비밀 값 노출            | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                                    |
+| 펌웨어 설정           | ESP-IDF와 Zephyr 설정 파일에서 켜 둔 테스트용 설정, HTTP로 받는 업데이트, 건너뛰는 인증서 확인      |
+| 열린 펌웨어 업데이트    | 누가 보내는지 확인하지 않고 펌웨어 업데이트를 쓰는 ESP-IDF 기기의 HTTP 경로                        |
 | 스키마 없는 테이블         | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블                           |
 
 ## 설정
@@ -100,6 +103,11 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `secret-in-source-code`                | 높음     | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음                                      |
 | `supabase-table-schema-missing`        | 정보     | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                                                  |
 | `external`                             | 정보~높음  | 다른 검사 도구가 SARIF 파일로 알린 결과. seethru가 직접 확인한 것은 아님                              |
+| `firmware-insecure-option-on`          | 중간~높음  | 테스트용으로만 쓰는 펌웨어 설정이 설정 파일에서 켜져 있음                                            |
+| `firmware-ota-over-http`               | 높음     | 설정 파일이 펌웨어 업데이트를 암호화되지 않은 HTTP로 받을 수 있게 함                                    |
+| `firmware-tls-verification-off`        | 높음     | 설정 파일이 기기가 서버 인증서 확인을 건너뛸 수 있게 함                                             |
+| `firmware-ota-unguarded`               | 높음     | 기기의 HTTP 경로가 펌웨어 업데이트를 쓰는데 부른 쪽을 확인하는 코드를 찾지 못함                           |
+| `secret-in-native-code`                | 높음     | C, C++ 코드나 펌웨어 설정 파일에 비밀 값이 있음                                               |
 
 - 문제 ID는 규칙 ID 뒤에 그래프 노드를 붙인 형태입니다. 예를 들어 `supabase-rls-disabled:table:public.orders`입니다.
 - 비밀 값 탐지의 문제 ID는 파일, 비밀 값 종류, 그 파일에서 같은 종류 중 몇 번째인지로 이루어집니다. 예를 들어 `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`입니다. 파일의 다른 코드가 바뀌어도 ID는 그대로입니다.
@@ -132,6 +140,19 @@ $ seethru scan . --build-output .next
 - 빌드 결과물로 확인한 파일의 탐지에는 "추정" 표시가 붙지 않습니다. 번들에서 찾은 비밀 값은 소스맵을 따라 원래 소스 줄을 가리킵니다.
 - 소스 파일 중 하나라도 빌드 결과물보다 2초를 넘게 새로우면 빌드 결과물을 쓰지 않고, 리포트의 "확인하지 못한 것"에 그 사실을 적습니다. 다시 빌드한 뒤 실행하세요.
 - 옵션이 없어도 `.next/server`와 `.next/standalone`은 서버 코드, `.next/static`은 브라우저 코드, `.next/cache`는 빌드 캐시로 취급합니다.
+
+## C, C++와 펌웨어
+
+seethru는 C, C++ 소스와 펌웨어 설정 파일을 빌드하지 않고 읽습니다. 이 부분은 새로 생겼고, 일부러 범위를 좁게 잡았습니다.
+
+- 펌웨어 프로젝트는 `sdkconfig` 파일(ESP-IDF), `prj.conf`(Zephyr), `platformio.ini`, `.ino` 스케치로 알아봅니다.
+- 읽는 설정 파일은 `sdkconfig`, `sdkconfig.defaults`와 그 변형, `prj.conf`, `prj_*.conf`입니다. 켜져 있다고 적힌 설정만 알립니다. 파일에 없는 설정은 아무것도 말해 주지 않으므로 "secure boot가 꺼져 있다"고 알리지 않습니다. CI용 파일과 `test`, `tests`, `examples` 폴더 아래의 파일은 건너뜁니다.
+- 진입점은 ESP-IDF HTTP 서버의 경로 중 `.uri`와 `.handler`를 적은 `httpd_uri_t` 값입니다. 처리 함수에서 함수 이름으로 호출을 따라가서 `esp_ota_write`나 `esp_https_ota`에 닿고, 그 사이에 부른 쪽을 확인하는 것처럼 보이는 함수가 없으면 그 경로를 알립니다.
+- 부른 쪽을 확인하는 것처럼 보이면 알리지 않습니다. `auth`, `password`, `token`, `session`, `verify` 같은 단어가 들어간 호출이나 문자열, 그런 일을 하는 래퍼로 바꿔 끼운 처리 함수, 찾을 수 없는 처리 함수가 여기에 해당합니다.
+- 매크로, 함수 포인터, C++ 오버로드, 생성된 코드는 따라가지 않습니다. 메모리 안전 버그는 찾지 않습니다. 그런 문제는 다른 검사 도구로 찾고 결과를 `--sarif`로 넘겨 주세요.
+- C, C++ 파일과 펌웨어 설정 파일에서 찾은 비밀 값은 규칙 `secret-in-native-code`로 알립니다. 개인 키는 본문이 있을 때만 알리므로, 키 머리글 이름만 다루는 파서 코드는 알리지 않습니다.
+- `--compile-commands`는 `compile_commands.json`을 데이터로만 읽습니다. 그 안의 명령은 실행하지 않습니다. 빌드 목록에 없는 소스 파일의 탐지는 "확인 필요"로 표시합니다.
+- `CMakeLists.txt`, `platformio.ini`, `sdkconfig` 파일 옆의 루트 `build`, `out` 폴더는 읽지 않고, `.pio`, `managed_components`, `CMakeFiles` 폴더는 항상 건너뜁니다.
 
 ## 다른 검사 도구의 결과
 
