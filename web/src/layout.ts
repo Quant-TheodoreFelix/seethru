@@ -62,6 +62,8 @@ export async function layoutReport(report: ScanReport): Promise<{ nodes: GraphNo
       source: edge.from,
       target: edge.to,
       className: `edge edge-${edge.kind}`,
+      selectable: false,
+      focusable: false,
       markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
     }),
   );

@@ -365,7 +365,9 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
             edges={edges}
             nodeTypes={nodeTypes}
             colorMode={theme}
+            nodesDraggable={false}
             nodesConnectable={false}
+            edgesFocusable={false}
             minZoom={0.1}
             proOptions={{ hideAttribution: true }}
             onNodeClick={(_, node) => {
