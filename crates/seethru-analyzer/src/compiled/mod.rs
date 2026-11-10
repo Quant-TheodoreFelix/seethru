@@ -19,8 +19,8 @@ use crate::rules;
 use crate::walk::{SKIPPED_DIRS, read_bytes};
 
 const MAX_FILES: usize = 1024;
-const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_TOTAL_BYTES: u64 = 2048 * 1024 * 1024;
 const MAX_DEPTH: usize = 6;
 const MAX_FINDINGS: usize = 500;
 const MAX_STEPS: usize = 6;
