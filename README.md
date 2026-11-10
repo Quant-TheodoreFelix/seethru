@@ -38,6 +38,7 @@ The report is written to `<project path>/.seethru/report.html`, and that directo
 | `--sarif FILE`       | Add the results another scanner wrote to FILE in SARIF 2.1.0. Up to 8 files       |
 | `--sarif-out FILE`   | Also write what seethru found to FILE in SARIF 2.1.0                               |
 | `--compile-commands FILE` | Read `compile_commands.json` from FILE, a file inside the project, to learn which C and C++ files are built |
+| `--llvm-ir PATH`     | Read compiled output of a Rust project from PATH, a `.ll` file or a folder of them. Can be given more than once (see [Rust](#rust)) |
 
 
 | Check                     | What it finds                                                                                                        |
@@ -51,6 +52,8 @@ The report is written to `<project path>/.seethru/report.html`, and that directo
 | Exposed secrets           | API keys and database URLs in code, build output and env files                                                       |
 | Firmware settings         | Test-only firmware settings left on, updates over plain HTTP and skipped certificate checks in ESP-IDF and Zephyr config files |
 | Open firmware update      | An HTTP route of an ESP-IDF device that writes a firmware update without checking who sends it                       |
+| Secret-dependent division | In compiled Rust code, a division of a value the code wipes after use, which leaks the value through timing          |
+| Cargo dependencies        | Git and `*` dependencies that are not fixed to one version in a project with no `Cargo.lock`                         |
 | Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked                         |
 
 ## Configuration
@@ -106,8 +109,11 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `firmware-tls-verification-off`        | High            | A config file lets the device skip checking the server certificate                                                           |
 | `firmware-ota-unguarded`               | High            | An HTTP route of the device writes a firmware update and no check of the caller was found                                    |
 | `secret-in-native-code`                | High            | A secret value is in C or C++ code or in a firmware config file                                                              |
+| `secret-dependent-division`            | Medium          | Compiled code divides a value that comes from memory the program wipes after use                                             |
+| `cargo-dependency-not-pinned`          | Low             | A Cargo dependency from git has no `rev`, or its version is `*`, and the project has no `Cargo.lock`                         |
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
+- The ID of a `secret-dependent-division` finding names the file and the order of the finding in that file, such as `secret-dependent-division:file:mldsa/src/sign.rs:2`. It does not carry the line number.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
 - Accepted findings stay in the report and the CLI summary under their own heading, with the reason. They do not count toward the totals or color the graph.
 - If `seethru.toml` cannot be used, the scan stops and names the line instead of ignoring it. That covers unknown keys, a missing reason, an unknown rule ID and invalid patterns. The file must be a regular file of up to 64 KB, with at most 256 `exclude` patterns and 1,000 `[[accept]]` entries.
@@ -151,6 +157,29 @@ seethru reads C and C++ sources and firmware config files without building them.
 - Secrets found in C or C++ files and firmware config files get the rule `secret-in-native-code`. A private key is reported only when its body is there, so parser code that only names the key header is not flagged.
 - `--compile-commands` reads `compile_commands.json` as data. Its commands are never run. A finding in a source file that the build does not list is marked "needs review".
 - A root `build` or `out` folder next to a `CMakeLists.txt`, `platformio.ini` or `sdkconfig` file is not read, and `.pio`, `managed_components` and `CMakeFiles` folders are always skipped.
+
+## Rust
+
+seethru reads a Cargo project from its root `Cargo.toml` and draws each crate and the crates it depends on. The checks that matter for Rust run on compiled output, because the compiler rewrites code after you write it.
+
+- Crates come from the root manifest: the root package, `[workspace] members` (with `exclude`), and every crate they reach through a `path` dependency. A `target` folder next to a `Cargo.toml` is not read as source.
+- A git dependency with no `rev`, or a version of `*`, is reported only when the project has no `Cargo.lock`.
+- seethru never runs `cargo`. To check compiled code, build it yourself and pass the output:
+
+```bash
+RUSTFLAGS="--emit=llvm-ir,asm -C debuginfo=line-tables-only" cargo build --release
+seethru scan . --llvm-ir target/release/deps
+```
+
+- With `--target` or a `build.target` setting, the files are in `target/<triple>/release/deps`.
+- seethru cannot tell whether the compiled output is older than the source. Build again after every change before you scan.
+
+- `--llvm-ir` takes a `.ll` file or a folder, which may be outside the project. For each `.ll` file, a `.s` file with the same name next to it is read as its machine code. Up to 64 files of 64 MB each.
+- **What counts as secret.** Memory that the code wipes with a volatile write on purpose, such as a call to `zeroize()`. Values read from that memory are followed through function calls, copies and returned pointers. Memory that a type wipes by itself when it is dropped does not count, because a hash state wipes itself even when it only held public data.
+- **What is reported.** A division or remainder of such a value (`secret-dependent-division`). The time a division takes depends on its operands on most processors. With a `.s` file, the finding is `likely` when the machine code has a division instruction for that source line, and it is dropped when the compiler turned a division by a constant into a multiplication. Without one it is `review`.
+- **What is not checked yet.** Branches and table lookups that depend on a secret, and whether a wipe survives the compiler. Both were tried and gave too many wrong results to ship. The report says so every time.
+- A secret that is only wiped by a caller outside the compiled files, or that sits behind a pointer stored in memory, is not followed. The output of a library is from before the final link. No finding does not mean constant time.
+- Paths in the compiled output must point into the scanned project, so build from the same checkout or use `--remap-path-prefix` to make them relative.
 
 ## Results from other scanners
 

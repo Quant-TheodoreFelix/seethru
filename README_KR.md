@@ -39,6 +39,7 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | `--sarif FILE`       | 다른 검사 도구가 SARIF 2.1.0으로 `FILE`에 쓴 결과를 함께 보여 줍니다. 최대 8개    |
 | `--sarif-out FILE`   | seethru가 찾은 것을 SARIF 2.1.0으로 `FILE`에도 저장합니다                         |
 | `--compile-commands FILE` | 프로젝트 안의 `compile_commands.json`을 읽어 어떤 C, C++ 파일이 빌드되는지 확인합니다 |
+| `--llvm-ir PATH`     | Rust 프로젝트의 컴파일 결과를 읽습니다. `.ll` 파일이나 그런 파일이 든 폴더이고 여러 번 줄 수 있습니다 ([Rust](#rust) 참고) |
 
 
 | 탐지 항목              | 설명                                                                            |
@@ -52,6 +53,8 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | 비밀 값 노출            | 코드, 빌드 결과물, 환경변수 파일에 들어 있는 API 키와 DB 접속 주소                                    |
 | 펌웨어 설정           | ESP-IDF와 Zephyr 설정 파일에서 켜 둔 테스트용 설정, HTTP로 받는 업데이트, 건너뛰는 인증서 확인      |
 | 열린 펌웨어 업데이트    | 누가 보내는지 확인하지 않고 펌웨어 업데이트를 쓰는 ESP-IDF 기기의 HTTP 경로                        |
+| 비밀 값 나눗셈        | 컴파일된 Rust 코드에서, 쓰고 나서 지우는 값으로 하는 나눗셈 (걸리는 시간으로 값이 새어 나감)      |
+| Cargo 의존성         | `Cargo.lock`이 없는 프로젝트에서 한 버전으로 고정되지 않은 git 의존성과 `*` 버전                   |
 | 스키마 없는 테이블         | 코드에서 쓰지만 저장소의 SQL 어디에도 만드는 구문이 없어 RLS를 확인할 수 없는 테이블                           |
 
 ## 설정
@@ -108,8 +111,11 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `firmware-tls-verification-off`        | 높음     | 설정 파일이 기기가 서버 인증서 확인을 건너뛸 수 있게 함                                             |
 | `firmware-ota-unguarded`               | 높음     | 기기의 HTTP 경로가 펌웨어 업데이트를 쓰는데 부른 쪽을 확인하는 코드를 찾지 못함                           |
 | `secret-in-native-code`                | 높음     | C, C++ 코드나 펌웨어 설정 파일에 비밀 값이 있음                                               |
+| `secret-dependent-division`            | 중간     | 컴파일된 코드가 프로그램이 쓰고 나서 지우는 메모리에서 나온 값으로 나눗셈을 함                         |
+| `cargo-dependency-not-pinned`          | 낮음     | git에서 받는 Cargo 의존성에 `rev`가 없거나 버전이 `*`이고, 프로젝트에 `Cargo.lock`이 없음          |
 
 - 문제 ID는 규칙 ID 뒤에 그래프 노드를 붙인 형태입니다. 예를 들어 `supabase-rls-disabled:table:public.orders`입니다.
+- `secret-dependent-division` 문제의 ID는 파일과 그 파일 안에서의 순서로 이루어집니다. 예를 들어 `secret-dependent-division:file:mldsa/src/sign.rs:2`입니다. 줄 번호는 들어가지 않습니다.
 - 비밀 값 탐지의 문제 ID는 파일, 비밀 값 종류, 그 파일에서 같은 종류 중 몇 번째인지로 이루어집니다. 예를 들어 `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`입니다. 파일의 다른 코드가 바뀌어도 ID는 그대로입니다.
 - 허용한 문제는 리포트와 CLI 요약에서 사유와 함께 따로 보여 줍니다. 전체 개수에는 들어가지 않고 그래프 색에도 반영되지 않습니다.
 - `seethru.toml`을 쓸 수 없으면 무시하지 않고, 문제가 있는 줄을 알려 주며 검사를 멈춥니다. 모르는 키, 빠진 사유, 없는 규칙 ID, 잘못된 패턴이 여기에 해당합니다. 파일은 64KB 이하의 일반 파일이어야 하고, `exclude` 패턴은 256개, `[[accept]]` 항목은 1,000개까지 쓸 수 있습니다.
@@ -153,6 +159,29 @@ seethru는 C, C++ 소스와 펌웨어 설정 파일을 빌드하지 않고 읽�
 - C, C++ 파일과 펌웨어 설정 파일에서 찾은 비밀 값은 규칙 `secret-in-native-code`로 알립니다. 개인 키는 본문이 있을 때만 알리므로, 키 머리글 이름만 다루는 파서 코드는 알리지 않습니다.
 - `--compile-commands`는 `compile_commands.json`을 데이터로만 읽습니다. 그 안의 명령은 실행하지 않습니다. 빌드 목록에 없는 소스 파일의 탐지는 "확인 필요"로 표시합니다.
 - `CMakeLists.txt`, `platformio.ini`, `sdkconfig` 파일 옆의 루트 `build`, `out` 폴더는 읽지 않고, `.pio`, `managed_components`, `CMakeFiles` 폴더는 항상 건너뜁니다.
+
+## Rust
+
+seethru는 루트 `Cargo.toml`에서 Cargo 프로젝트를 읽고, 크레이트와 그 사이의 의존 관계를 그립니다. Rust에서 중요한 검사는 컴파일 결과에서 합니다. 컴파일러가 작성한 코드를 다시 바꾸기 때문입니다.
+
+- 크레이트는 루트 매니페스트에서 찾습니다. 루트 패키지, `[workspace] members`(`exclude` 반영), 그리고 거기서 `path` 의존성으로 닿는 크레이트입니다. `Cargo.toml` 옆의 `target` 폴더는 소스로 읽지 않습니다.
+- `rev`가 없는 git 의존성과 `*` 버전은 프로젝트에 `Cargo.lock`이 없을 때만 알립니다.
+- seethru는 `cargo`를 실행하지 않습니다. 컴파일된 코드를 검사하려면 직접 빌드한 뒤 결과를 넘겨 주세요.
+
+```bash
+RUSTFLAGS="--emit=llvm-ir,asm -C debuginfo=line-tables-only" cargo build --release
+seethru scan . --llvm-ir target/release/deps
+```
+
+- `--target`이나 `build.target` 설정을 쓰면 파일은 `target/<triple>/release/deps`에 있습니다.
+- 컴파일 결과가 소스보다 오래됐는지는 seethru가 알 수 없습니다. 코드를 바꿀 때마다 다시 빌드한 뒤 검사하세요.
+
+- `--llvm-ir`에는 `.ll` 파일이나 폴더를 줍니다. 프로젝트 밖에 있어도 됩니다. `.ll` 파일 옆에 이름이 같은 `.s` 파일이 있으면 그 기계어로 읽습니다. 파일은 64개, 하나에 64MB까지입니다.
+- **비밀로 보는 것.** 코드가 일부러 volatile 쓰기로 지우는 메모리입니다. `zeroize()` 호출이 여기에 해당합니다. 그 메모리에서 읽은 값을 함수 호출, 복사, 돌려받은 포인터를 따라 추적합니다. 타입이 drop될 때 알아서 지우는 메모리는 비밀로 보지 않습니다. 해시 상태는 공개 값만 담았을 때도 스스로 지우기 때문입니다.
+- **알리는 것.** 그런 값으로 하는 나눗셈과 나머지 연산입니다(`secret-dependent-division`). 대부분의 프로세서에서 나눗셈에 걸리는 시간은 숫자에 따라 달라집니다. `.s` 파일이 있으면, 그 소스 줄에 나눗셈 명령이 있을 때 `추정`으로 알리고, 컴파일러가 상수 나눗셈을 곱셈으로 바꾼 경우는 알리지 않습니다. `.s` 파일이 없으면 `확인 필요`입니다.
+- **아직 확인하지 않는 것.** 비밀에 따라 갈리는 분기와 표 조회, 그리고 소거가 컴파일 뒤에도 남는지입니다. 둘 다 시험해 봤지만 틀린 결과가 너무 많아 넣지 않았습니다. 리포트는 매번 이 사실을 알립니다.
+- 컴파일된 파일 밖의 호출자만 지우는 비밀, 메모리에 저장된 포인터 뒤의 비밀은 따라가지 못합니다. 라이브러리의 결과는 최종 링크 전 단계입니다. 탐지가 없다고 상수 시간이라는 뜻은 아닙니다.
+- 컴파일 결과 안의 경로가 검사하는 프로젝트를 가리켜야 합니다. 같은 체크아웃에서 빌드하거나 `--remap-path-prefix`로 상대 경로로 만드세요.
 
 ## 다른 검사 도구의 결과
 
