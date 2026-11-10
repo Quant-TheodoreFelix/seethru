@@ -18,8 +18,11 @@ use crate::walk::SKIPPED_DIRS;
 pub(crate) const MAX_FILES: usize = 8;
 const MAX_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_RUNS: usize = 8;
+const MAX_EXTENSIONS: usize = 100;
 const MAX_LIST: usize = 20_000;
-const MAX_KEPT: usize = 5_000;
+const MAX_KEPT: usize = 4_000;
+const MAX_FINDINGS: usize = 5_000;
+const MAX_INPUTS: usize = 32;
 const MAX_NEW_FILES: usize = 500;
 const MAX_RULE_CHARS: usize = 200;
 const MAX_ENGINE_CHARS: usize = 32;
@@ -141,6 +144,7 @@ struct Run {
 #[serde(default)]
 struct Tool {
     driver: Lenient<Driver>,
+    extensions: List<Driver>,
 }
 
 #[derive(Deserialize, Default)]
@@ -186,9 +190,16 @@ struct Reported {
 }
 
 #[derive(Deserialize, Default)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 struct RuleRef {
     id: Lenient<String>,
+    index: Lenient<i64>,
+    tool_component: Lenient<ComponentRef>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ComponentRef {
     index: Lenient<i64>,
 }
 
@@ -280,12 +291,21 @@ pub(crate) fn read_all(
             let engine = engine_of(&run);
             let slot = counts.entry(engine.clone()).or_default();
             slot.1 = slot.1.saturating_add(run.results.lost);
-            let rules = run
-                .tool
-                .0
-                .and_then(|tool| tool.driver.0)
-                .map(|driver| driver.rules.items)
-                .unwrap_or_default();
+            let (rules, extensions) = match run.tool.0 {
+                Some(tool) => (
+                    tool.driver
+                        .0
+                        .map(|driver| driver.rules.items)
+                        .unwrap_or_default(),
+                    tool.extensions
+                        .items
+                        .into_iter()
+                        .take(MAX_EXTENSIONS)
+                        .map(|extension| extension.rules.items)
+                        .collect::<Vec<_>>(),
+                ),
+                None => (Vec::new(), Vec::new()),
+            };
             let bases = run.original_uri_base_ids.0.unwrap_or_default();
             let roots = claimed_roots(&[root, given], &bases);
             for reported in run.results.items {
@@ -303,6 +323,7 @@ pub(crate) fn read_all(
                     &reported,
                     &engine,
                     &rules,
+                    &extensions,
                     &run.artifacts.items,
                     &bases,
                     &roots,
@@ -332,7 +353,7 @@ pub(crate) fn read_all(
         if counts.is_empty() {
             counts.insert("unknown".to_owned(), (0, 0));
         }
-        for (engine, (results, dropped)) in counts {
+        for (engine, (results, dropped)) in counts.into_iter().take(MAX_INPUTS / MAX_FILES) {
             let dropped = dropped.saturating_add(std::mem::take(&mut lost));
             imported.dropped |= dropped > 0;
             imported.inputs.push(Input::Sarif {
@@ -429,7 +450,8 @@ fn rule_name(raw: &str) -> Option<String> {
 fn item_of(
     reported: &Reported,
     engine: &str,
-    rules: &[Rule],
+    driver_rules: &[Rule],
+    extensions: &[Vec<Rule>],
     artifacts: &[Artifact],
     bases: &BTreeMap<String, Lenient<ArtifactLocation>>,
     roots: &[String],
@@ -445,12 +467,21 @@ fn item_of(
         .0
         .as_deref()
         .or_else(|| reference.and_then(|rule| rule.id.0.as_deref()));
+    let component = reference
+        .and_then(|rule| rule.tool_component.0.as_ref())
+        .and_then(|component| component.index.0)
+        .and_then(|index| usize::try_from(index).ok());
+    let rules = match component {
+        Some(index) => extensions.get(index).map(Vec::as_slice).unwrap_or_default(),
+        None => driver_rules,
+    };
     let rule = index
         .and_then(|index| rules.get(index))
         .filter(|rule| id.is_none() || rule.id.0.as_deref() == id)
         .or_else(|| {
-            rules
-                .iter()
+            std::iter::once(driver_rules)
+                .chain(extensions.iter().map(Vec::as_slice))
+                .flatten()
                 .find(|rule| id.is_some() && rule.id.0.as_deref() == id)
         });
     let id = id.or_else(|| rule.and_then(|rule| rule.id.0.as_deref()))?;
@@ -639,9 +670,14 @@ fn claimed_roots(
         .map(|path| format!("{}/", path.trim_end_matches('/')))
         .filter(|path| path.len() > 1)
         .collect();
-    roots.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
-    roots.dedup();
-    roots
+    roots.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    let mut outer: Vec<String> = Vec::new();
+    for root in roots {
+        if !outer.iter().any(|kept| root.starts_with(kept.as_str())) {
+            outer.push(root);
+        }
+    }
+    outer
 }
 
 fn resolve(
@@ -651,12 +687,7 @@ fn resolve(
     roots: &[String],
 ) -> Option<String> {
     let mut path = local_path(uri)?;
-    if path.starts_with('/') {
-        let inner = roots
-            .iter()
-            .find_map(|root| path.strip_prefix(root.as_str()))?;
-        path = inner.to_owned();
-    } else {
+    if !path.starts_with('/') {
         let mut next = base_id;
         let mut seen = BTreeSet::new();
         while let Some(id) = next {
@@ -669,12 +700,18 @@ fn resolve(
             let Some(prefix) = base.uri.0.as_deref().and_then(local_path) else {
                 break;
             };
-            if prefix.starts_with('/') {
+            path = format!("{}/{path}", prefix.trim_end_matches('/'));
+            if path.starts_with('/') {
                 break;
             }
-            path = format!("{}/{path}", prefix.trim_end_matches('/'));
             next = base.uri_base_id.0.as_deref();
         }
+    }
+    if path.starts_with('/') {
+        let inner = roots
+            .iter()
+            .find_map(|root| path.strip_prefix(root.as_str()))?;
+        path = inner.to_owned();
     }
     let mut parts = Vec::new();
     for part in path.split('/') {
@@ -715,10 +752,16 @@ pub(crate) fn emit(
     known: &dyn Fn(&str) -> Option<(FileRole, Basis)>,
 ) -> bool {
     let mut dropped = false;
+    let mut room = MAX_FINDINGS.saturating_sub(graph.finding_count());
     let mut added = BTreeSet::new();
     let mut ordinals: BTreeMap<(&str, &str, &str), u32> = BTreeMap::new();
     for item in &imported.items {
         let node = file_id(&item.path);
+        if room == 0 {
+            dropped = true;
+            break;
+        }
+        room -= 1;
         if !graph.has_node(&node) && !added.contains(&item.path) {
             if added.len() >= MAX_NEW_FILES {
                 dropped = true;

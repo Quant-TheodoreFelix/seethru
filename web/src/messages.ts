@@ -173,7 +173,12 @@ const en: Messages = {
       filesExcluded > 0 ? `${filesExcluded} excluded by ${configFile ?? "seethru.toml"}` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`build output read from ${input.path}`] : [])),
       ...inputs.flatMap((input) =>
-        input.type === "sarif" ? [`${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}`] : [],
+        input.type === "sarif"
+          ? [
+              `${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}` +
+                (input.dropped > 0 ? ` (${input.dropped} left out)` : ""),
+            ]
+          : [],
       ),
       truncated ? "stopped early" : "",
     ]
@@ -295,7 +300,11 @@ const ko: Messages = {
       `파일 ${filesScanned}개 검사`,
       filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`${input.path} 빌드 결과물 읽음`] : [])),
-      ...inputs.flatMap((input) => (input.type === "sarif" ? [`${input.engine} 결과 ${input.results}개`] : [])),
+      ...inputs.flatMap((input) =>
+        input.type === "sarif"
+          ? [`${input.engine} 결과 ${input.results}개` + (input.dropped > 0 ? ` (${input.dropped}개 뺌)` : "")]
+          : [],
+      ),
       truncated ? "일부만 검사함" : "",
     ]
       .filter(Boolean)

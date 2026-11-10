@@ -136,6 +136,10 @@ impl Graph {
         self.nodes.contains_key(id)
     }
 
+    pub(crate) fn finding_count(&self) -> usize {
+        self.findings.len()
+    }
+
     pub(crate) fn add_external(&mut self, finding: Finding) {
         self.findings.entry(finding.id.clone()).or_insert(finding);
     }

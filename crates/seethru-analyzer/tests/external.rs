@@ -268,3 +268,59 @@ fn a_bare_external_rule_cannot_hide_every_scanner_result() {
     );
     assert!(seethru_analyzer::scan(&project.root).is_ok());
 }
+
+#[test]
+fn base_folders_and_rules_of_extensions_are_followed() {
+    let project = TempProject::new("sarif-base");
+    project.write("a.c", "int a;\n");
+    project.write("sub/a.c", "int a;\n");
+    let root = project.root.canonicalize();
+    assert!(root.is_ok());
+    let Ok(root) = root else { return };
+    let root = root.to_string_lossy().replace('\\', "/");
+    let log = format!(
+        r##"{{ "version": "2.1.0", "runs": [{{
+      "tool": {{ "driver": {{ "name": "CodeQL" }}, "extensions": [
+        {{ "name": "other", "rules": [] }},
+        {{ "name": "queries", "rules": [
+          {{ "id": "cpp/unused" }},
+          {{ "id": "cpp/command-line-injection",
+             "properties": {{ "tags": ["security", "external/cwe/cwe-078"], "security-severity": "9.8" }} }}
+        ] }}
+      ] }},
+      "originalUriBaseIds": {{
+        "SUB": {{ "uri": "file://{root}/sub/" }},
+        "ELSEWHERE": {{ "uri": "file:///ci/checkout/" }},
+        "INNER": {{ "uri": "sub/", "uriBaseId": "ROOT" }},
+        "ROOT": {{ "uri": "file://{root}/" }}
+      }},
+      "results": [
+        {{ "ruleId": "cpp/command-line-injection",
+           "rule": {{ "id": "cpp/command-line-injection", "index": 1, "toolComponent": {{ "index": 1 }} }},
+           "locations": [{{ "physicalLocation": {{
+             "artifactLocation": {{ "uri": "a.c", "uriBaseId": "SUB" }}, "region": {{ "startLine": 1 }} }} }}] }},
+        {{ "ruleId": "cpp/command-line-injection",
+           "locations": [{{ "physicalLocation": {{
+             "artifactLocation": {{ "uri": "a.c", "uriBaseId": "INNER" }}, "region": {{ "startLine": 1, "startColumn": 2 }} }} }}] }},
+        {{ "ruleId": "cpp/command-line-injection",
+           "locations": [{{ "physicalLocation": {{
+             "artifactLocation": {{ "uri": "a.c", "uriBaseId": "ELSEWHERE" }} }} }}] }}
+      ] }}] }}"##
+    );
+    let (_holder, path) = outside("sarif-base-file", &log);
+    let result = scan(&project, &[path]);
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+    assert_eq!(
+        ids(&report),
+        [
+            "external:codeql:cpp/command-line-injection:file:a.c:1",
+            "external:codeql:cpp/command-line-injection:file:sub/a.c:1",
+            "external:codeql:cpp/command-line-injection:file:sub/a.c:2",
+        ]
+    );
+    for finding in &report.findings {
+        assert_eq!(finding.severity, Severity::High);
+        assert_eq!(finding.cwe, [78]);
+    }
+}
