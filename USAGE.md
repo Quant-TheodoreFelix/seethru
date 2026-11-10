@@ -13,7 +13,10 @@ This page explains how to run seethru, what every option does, how to configure 
 - [Build output](#build-output)
 - [C, C++ and firmware](#c-c-and-firmware)
 - [Rust](#rust)
+- [Checking that memory wipes are still in the built program](#checking-that-memory-wipes-are-still-in-the-built-program)
+- [Checking a running app](#checking-a-running-app)
 - [Results from other scanners](#results-from-other-scanners)
+- [Using seethru from a coding agent (MCP)](#using-seethru-from-a-coding-agent-mcp)
 - [Agent skill](#agent-skill)
 
 ## Build and run
@@ -34,6 +37,8 @@ For a release binary at `target/release/seethru`, run `cargo build --release -p 
 | Command                  | What it does                                                          |
 |--------------------------|-----------------------------------------------------------------------|
 | `seethru scan [PATH]`    | Analyze a project directory (default is the current directory)        |
+| `seethru own URL [PATH]` | Print the address and the one line a running app must serve before seethru will check it. Sends nothing (see [Checking a running app](#checking-a-running-app)) |
+| `seethru mcp`            | Run as an MCP server for a coding agent, over standard input and output (see [Using seethru from a coding agent (MCP)](#using-seethru-from-a-coding-agent-mcp)) |
 | `seethru schema`         | Print the JSON Schema of the scan report                              |
 | `seethru --version`      | Print the version                                                     |
 | `seethru --help`         | Print the usage text. Running `seethru` with no arguments does the same |
@@ -44,7 +49,13 @@ The full form of the scan command is:
 seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
              [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
              [--compile-commands FILE] [--llvm-ir PATH]... [--build]
+             [--binary FILE]... [--tool NAME[=PATH]]...
+             [--probe URL (--staging | --production --confirm-production)]
+seethru own URL [PATH] [--lang LANG]
+seethru mcp [--root DIR]... [--allow-build] [--tool NAME[=PATH]]...
 ```
+
+By default seethru only reads files. It runs something or sends something only when you name it with an option: `--build` runs a cargo build, `--tool` allows one outside tool, and `--probe` together with `--tool curl` sends requests to an app you proved is yours.
 
 ## Options
 
@@ -60,11 +71,20 @@ seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
 | `--compile-commands FILE` | Read `compile_commands.json` from FILE, a file inside the project, to learn which C and C++ files are built (see [C, C++ and firmware](#c-c-and-firmware)) |
 | `--llvm-ir PATH`     | Read compiled output of a Rust project from PATH, a `.ll` file or a folder of them. Can be given more than once (see [Rust](#rust)) |
 | `--build`            | Build a Rust project with cargo and read what it built. Runs the project's build scripts and macros, so use it only on code you trust (see [Rust](#rust)) |
+| `--binary FILE`      | A linked program (ELF or Mach-O) that you built from this project, to check that memory wipes are still in it. Up to 16 times. Reading it needs `--tool` (see [Checking that memory wipes are still in the built program](#checking-that-memory-wipes-are-still-in-the-built-program)) |
+| `--tool NAME[=PATH]` | Allow seethru to run one outside tool on this computer. `NAME` is `objdump`, `dwarfdump` or `curl`. Nothing outside is run without it. `PATH` is the full path of the tool when it is not on `PATH` |
+| `--probe URL`        | Also check the running app at `URL`, such as `https://staging.example.com`. Needs `--tool curl` and one of `--staging` or `--production` (see [Checking a running app](#checking-a-running-app)) |
+| `--staging`          | The app at `URL` is a test copy. Prefer this                                       |
+| `--production`       | The app at `URL` is the one real users use. Also needs `--confirm-production`      |
+| `--confirm-production` | Say a second time that you mean the app real users use                           |
 
 - `--lang` takes `en` or `ko`. Any other value is an error.
 - `--json` and `--out` cannot be used together.
 - `--sarif-out` must be a different file from every `--sarif` file and from `--out`.
 - `--json` prints the report to the terminal. Without it, seethru prints a short summary and then the path of the report it wrote.
+- `--tool objdump` and `--tool dwarfdump` need something to read, so they need `--binary` or `--build`. `--tool curl` needs `--probe`. The same tool cannot be named twice, and a `PATH` must be a full path.
+- `--probe` needs exactly one of `--staging` and `--production`. `--production` without `--confirm-production` is an error, and nothing is sent.
+- Before it runs an outside tool, seethru prints the full command on stderr.
 
 ## Exit codes
 
@@ -130,12 +150,17 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `secret-dependent-division`            | Medium          | Compiled code divides a value that comes from memory the program wipes after use                                             |
 | `stop-on-outside-input`                | Low             | Compiled code keeps a check that panics, and the value it tests comes from an exported entry point such as a system call handler |
 | `cargo-dependency-not-pinned`          | Low             | A Cargo dependency from git has no `rev`, or its version is `*`, and the project has no `Cargo.lock`                         |
+| `memory-wipe-removed`                  | Low             | A line that fills memory with zeros is in the Rust source, and the built program has no code for it. Needs `--tool objdump --tool dwarfdump` |
+| `security-header-missing`              | Low             | The first page of the running app answers without a security header. One finding per header. Needs `--probe`                 |
+| `cors-allows-any-origin-with-credentials` | Low to Medium | The running app tells browsers that any site may read its answers together with the visitor's cookies. Needs `--probe`      |
 
 ### Finding IDs
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
 - The ID of a `secret-dependent-division` or `stop-on-outside-input` finding names the file and the order of the finding in that file, such as `secret-dependent-division:file:mldsa/src/sign.rs:2`. It does not carry the line number.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
+- The ID of a `memory-wipe-removed` finding names the file and the position of that wipe among the wipes seethru recognizes in the file, such as `memory-wipe-removed:file:src/main.rs:1`. It does not carry the line number. Adding or removing such a wipe earlier in the same file changes the numbers after it.
+- Findings on a running app do not name the address. They are `security-header-missing:header:<name>`, where the name is `content-security-policy`, `x-content-type-options`, `frame-protection` or `strict-transport-security`, and `cors-allows-any-origin-with-credentials:app`. The same app gets the same IDs on staging and on production, so one `[[accept]]` entry covers both.
 
 ### Accepted findings and errors
 
@@ -203,7 +228,8 @@ seethru scan . --llvm-ir target/release/deps
 - **What is reported.** A division or remainder of such a value (`secret-dependent-division`). The time a division takes depends on its operands on most processors. With a `.s` file, the finding is `likely` when the machine code has a division instruction for that source line, and it is dropped when the compiler turned a division by a constant into a multiplication. Without one it is `review`.
 - **Checks that can stop the program (`stop-on-outside-input`).** For kernels, firmware and libraries called from other languages. seethru treats the arguments of exported functions with unmangled names (`#[no_mangle]`, `extern "C"`), and the memory they point to, as values from outside. It reports a check that is still in the compiled code, panics when it fails and tests such a value: an index or slice range, an arithmetic overflow, `unwrap`, `expect`. A panic stops the program, and in a kernel it stops the whole system. The compiler already removed every check it could prove safe, so what is left is what it could not prove. An earlier check or a rule of your design may still make it impossible, which seethru cannot see, so these findings are always `review` and severity Low. Values that the outside value only selects, such as an entry of a kernel table picked by a caller's index, are not followed. Without such an entry point the report says the check did not run.
 - A volatile write to an address made from a number is a device register write and does not count as a wipe.
-- **What is not checked yet.** Branches and table lookups that depend on a secret, and whether a wipe survives the compiler. Both were tried and gave too many wrong results to ship. The report says so every time.
+- **What is not checked yet.** Branches and table lookups that depend on a secret. This was tried and gave too many wrong results to ship. The report says so every time.
+- **Whether a wipe survives the compiler** cannot be seen in `.ll` and `.s` files. It is checked in the linked program, and only when you allow the tools that read it (see [Checking that memory wipes are still in the built program](#checking-that-memory-wipes-are-still-in-the-built-program)).
 - A secret that is only wiped by a caller outside the compiled files, or that sits behind a pointer stored in memory, is not followed. The output of a library is from before the final link. No finding does not mean constant time.
 - Paths in the compiled output must point into the scanned project, so build from the same checkout or use `--remap-path-prefix` to make them relative.
 
@@ -213,7 +239,7 @@ seethru scan . --llvm-ir target/release/deps
 seethru scan . --build
 ```
 
-`--build` is the only case where seethru runs anything from your project. It is off unless you pass it.
+`--build` is the only option that runs code from your project. It is off unless you pass it. Outside tools are a separate permission, given with `--tool`.
 
 - **Use it only on code you trust.** A cargo build runs the project's `build.rs` scripts and macros on your computer, and those of its dependencies. seethru cannot stop or sandbox that. For a repository you do not trust, scan without `--build`.
 - It runs `cargo build --release --locked --offline --target-dir PATH/.seethru/build/<project>` from the folder that holds the `Cargo.toml` and prints that command first. The project's own settings in `.cargo/config.toml`, such as the target and compiler flags, apply as usual.
@@ -228,6 +254,78 @@ seethru scan . --build
 - Compiled output is kept only for crates whose source is inside `PATH`. Dependencies from a registry or from git are built as usual but not read, so a secret is not followed into them.
 - There is no time limit. Stop it with Ctrl-C if a build hangs.
 - `--build` and `--llvm-ir` can be used together.
+- When the build makes a program and you did not pass `--tool objdump --tool dwarfdump`, the report says under "Not checked" that the program was there and was not read.
+
+## Checking that memory wipes are still in the built program
+
+Code that handles a key or a password often fills that memory with zeros when it is done, so the secret does not stay behind. A compiler is allowed to delete a write that nothing reads afterwards, and it often does. The source still shows the wipe. The program you ship does not have it. Only the finished program tells you which.
+
+seethru can check this for Rust, if you let it run two tools that read a built program:
+
+```bash
+seethru scan . --build --tool objdump --tool dwarfdump
+```
+
+Or, for a program you built yourself:
+
+```bash
+seethru scan . --binary target/release/myapp --tool objdump --tool dwarfdump
+```
+
+- **What you need.** The LLVM versions of `objdump` and `dwarfdump`. On macOS they come with the Xcode command line tools. seethru goes through the folders on your `PATH` in order, and in each one looks for `llvm-objdump` and `llvm-dwarfdump` first, then for `objdump` and `dwarfdump`. If they are somewhere else, give the full path: `--tool objdump=/full/path/to/llvm-objdump`. Both tools are needed, because one shows which source line each instruction came from and the other shows where a function was copied into its caller.
+- **What seethru looks for in the source.** Lines that fill memory with zeros and are the last use of that memory in the function: `x.fill(0)`, `write_bytes` and `memset` with zero, and `x = [0; N];`. Wipes the compiler must keep, such as `zeroize()` and `write_volatile`, are used to make sure the method works on your program. They are never reported.
+- **What is reported.** `memory-wipe-removed`, when the program has code for the rest of the function and none for that line, and at least one other wipe in the same program was found by the same method. It is `likely` when every wipe that must be there was found, and `review` otherwise. Severity is Low: someone needs a second problem, such as a crash dump, to read the leftover secret.
+- **If the line only clears a buffer that holds no secret**, the compiler was right to remove it. Accept the finding in `seethru.toml` with a reason.
+- **With `--build`**, seethru reads the linked programs the build makes (executables and dynamic libraries). A project that is only a library makes none, and the report says so. Wipes disappear when the program that uses the library is built, so pass that program with `--binary`.
+- **`--binary`** takes a linked ELF or Mach-O file, up to 16 of them. An object file, a file with more than one architecture, or anything else is an error. The program must be built from the same checkout and must have line information. `--build` adds it for you. For your own cargo build, turn it on, for example with `debug = "line-tables-only"` in the release profile. On macOS the line information is in the `.dSYM` folder, which must stay next to the program. In an ELF program it is inside the file, so a stripped one cannot be checked. A program without line information is not checked, and the report says so.
+- **How the tools are run.** seethru runs the tool directly, without a shell, with an empty environment, and prints the command first. It never runs a program that sits inside the scanned project. A tool gets 600 seconds. Set `SEETHRU_TOOL_TIMEOUT_SECS` (1 to 86400) to change that. If a tool is missing, is not the LLVM version, runs out of time or prints something seethru does not understand, the program is not checked and the report says so. Nothing of what the tool prints goes into the report except file paths inside your project and line numbers.
+- **What this does not tell you.** Line information in an optimized program is not exact, so read the code before you trust a finding. Wipes done when a value is dropped, wipes inside macros, wipes in other languages, plain loops such as `*b = 0` and `self.fill(0)` are not recognized. A wipe that is still there does not prove that every copy of the secret is cleared. The report lists these limits every time.
+- This check has been run on seethru's own test program and on two real projects, on macOS, one of which builds programs. No real project has produced a finding yet, so how often it is wrong on real code is not known. It has not been tried with the tools of a Linux system.
+
+## Checking a running app
+
+seethru can also look at the app you deployed. This is the only case where seethru sends anything over the network, and it does so only to an app you proved is yours.
+
+**1. Ask seethru for the proof line.** Nothing is sent.
+
+```bash
+seethru own https://staging.example.com .
+```
+
+seethru prints an address and one line:
+
+```
+https://staging.example.com/.well-known/seethru-ownership.txt
+seethru-ownership=<64 hex characters>
+```
+
+**2. Make the app serve that line at that address.** A plain text file with that one line is enough. In most web projects this is a file named `seethru-ownership.txt` in a `.well-known` folder inside the folder for static files, such as `public`.
+
+**3. Deploy the app.**
+
+**4. Scan with `--probe`.**
+
+```bash
+seethru scan . --probe https://staging.example.com --staging --tool curl
+```
+
+What to know:
+
+- **The line is safe to publish.** It is made from a secret that stays on your computer in `PATH/.seethru/ownership`. A person who reads the line on your site cannot use it to check your app. The line works for one address only, so staging and production each need their own `seethru own`. Run the scan on the same project folder where you ran `seethru own`, because the secret is kept there. `.seethru` is ignored by git, so the secret is not committed. Remove the file from the app when you no longer want checks.
+- **Staging first.** Say which kind of app the address is. `--staging` is a test copy. `--production` is the app real users use, and it also needs `--confirm-production`. Without that, seethru stops and sends nothing.
+- **What is sent.** A few plain `GET` requests through `curl`, to that address only: first the proof file, then the first page, then the first page again with a made-up `Origin` header. There are no logins, no cookies, no request bodies and nothing that changes data. Requests are at least half a second apart, and one run sends at most 40.
+- **seethru stays on your address.** A redirect to another site is not followed and the check ends there. The network address that answered the first request is kept for the rest of the run.
+- **Only `https://`.** `http://` is accepted only for an app on this computer (`localhost` or `127.0.0.1`), because anyone on the network can read or change a plain `http` request.
+- **What is kept.** The status code and up to eight response headers that the checks need. Page content is thrown away as it arrives, and cookies are never kept.
+- **The audit log.** Every request is written to `PATH/.seethru/audit.jsonl` before it is sent, with the time, the path, why it was sent and the status that came back. If the log cannot be written, the request is not sent.
+- **Proof files.** Each finding points to a file in `PATH/.seethru/proof` that lists the requests that showed it. The summary and the HTML report name the file.
+- **What is reported.** `security-header-missing`: no content security policy, no `X-Content-Type-Options: nosniff`, nothing that stops other sites from showing the page in a frame, and on `https` no `Strict-Transport-Security`. `cors-allows-any-origin-with-credentials`: the app tells browsers that any site may read its answers with the visitor's cookies.
+- **What is not checked.** Only the first page is read. Other pages, API addresses, logging in, and whether one account can read another account's data are not checked. Whether a content security policy is a good one is not judged. The report says so under "Not checked".
+- The fix is in the app or in the hosting settings. After you fix it, deploy and scan again, because only the running app shows the result.
+- The report, the HTML file and the JSON do not contain the address of the app. The audit log does.
+- `--sarif-out` leaves these findings out, because a SARIF result needs a file and a line. seethru says how many it left out. They are in the report.
+- `curl` gets 30 seconds per request. `SEETHRU_TOOL_TIMEOUT_SECS` changes that too.
+- So far this has been run against test servers on the same computer. It has not been run against a real `https` site from start to finish.
 
 ## Results from other scanners
 
@@ -243,8 +341,55 @@ $ seethru scan . --sarif-out seethru.sarif
 - The scanner's own text is not copied. Messages, code snippets and help text can hold secrets or instructions aimed at an AI tool, so the report keeps only the scanner name, the rule name, CWE numbers, the file and the line. Titles, explanations and fix prompts are written by seethru.
 - A result is kept only when its file exists inside the scanned project. Results on other paths, on excluded files, on remote addresses, or without a usable location are left out, and the report says how many.
 - To accept results, use `engine`, `external-rule` and `path` in `[[accept]]`. `rule = "external"` alone is rejected, because it would hide every scanner at once.
-- `--sarif-out` writes seethru's own findings as SARIF, for example for GitHub code scanning. Accepted findings are marked as suppressed. Results that came from another scanner are not written again.
+- `--sarif-out` writes seethru's own findings as SARIF, for example for GitHub code scanning. Accepted findings are marked as suppressed. Results that came from another scanner are not written again. Findings on a running app have no file and are left out. seethru prints how many.
 - Joern's `joern-scan` prints text and has no SARIF option. Joern exports SARIF from a script that calls `cpg.finding.toSarifJson()`. The `tests/test-sarif.sc` file in the Joern repository shows how.
+
+## Using seethru from a coding agent (MCP)
+
+`seethru mcp` lets a coding agent such as Claude Code or Cursor call seethru through MCP (Model Context Protocol). The agent can scan a folder, read a finding in full and see what was not checked.
+
+Register it with the full path of the `seethru` program and the folder the agent may scan. For Claude Code:
+
+```bash
+claude mcp add seethru -- /full/path/to/seethru mcp --root /full/path/to/project
+```
+
+For an agent that reads a JSON list of MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "seethru": {
+      "command": "/full/path/to/seethru",
+      "args": ["mcp", "--root", "/full/path/to/project"]
+    }
+  }
+}
+```
+
+**Only the flags you start the server with decide what may run.** The agent cannot change them from inside a conversation.
+
+| Flag                 | What it allows                                                                    |
+|----------------------|-----------------------------------------------------------------------------------|
+| `--root DIR`         | A folder the agent may scan. Can be given more than once. Without it, only the folder the server was started in |
+| `--allow-build`      | The agent may ask for a scan that builds the project, like `--build`              |
+| `--tool NAME[=PATH]` | The agent may ask for a scan that runs this outside tool. `objdump` and `dwarfdump` only, and it needs `--allow-build` |
+
+- Without `--allow-build` and `--tool`, the server only reads files.
+- When the agent asks for something you did not allow, the server refuses and tells the agent to ask you. To allow it, change the registration yourself and restart the agent.
+- Even when a build or a tool is allowed, the server tells the agent to ask you before each call that uses one.
+- A folder outside the `--root` folders is refused, also through a symbolic link.
+- The tools the agent gets:
+
+| Tool               | What it does                                                                     |
+|--------------------|----------------------------------------------------------------------------------|
+| `scan`             | Scans a folder and returns the counts, up to 200 findings and what was not checked |
+| `get_finding`      | Returns one finding of the last scan in full, with the fix prompt                |
+| `list_limitations` | Returns what the last scan could not check                                       |
+| `get_permissions`  | Returns what you allowed when you started the server                             |
+
+- Checking a running app (`--probe`) is not available through MCP. Neither are `--binary`, `--llvm-ir`, `--build-output`, `--sarif`, `--compile-commands` and `--no-config`. A scan through MCP always reads the project's `seethru.toml`. Use the command line for those.
+- The server speaks MCP over standard input and output, protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`.
 
 ## Agent skill
 

@@ -11,7 +11,7 @@ English | [한국어](README_KR.md)
 seethru is a **defensive security checker** that lets you see the security problems in your vibe-coded app and fix them yourself with the AI tools you already use. It belongs to the same category as DAST (Dynamic Application Security Testing) tools such as OWASP ZAP and Burp Suite. What sets it apart is **how it shows** the results and **how it fixes** them.
 
 > [!WARNING]
-> Early stage of development. Only offline static analysis (Security Map) and fix prompts (Fix Prompt) work today. Dynamic checks (Proof Replay) are not implemented yet.
+> Early stage of development. Offline static analysis (Security Map) and fix prompts (Fix Prompt) work today. Dynamic checks (Proof Replay) have a first step: security headers and CORS on the first page of a running app you proved is yours. Reproducing access problems between test accounts is not implemented yet.
 
 ## Why
 
@@ -27,6 +27,8 @@ cargo run -p seethru-cli -- scan <project path>
 ```
 
 The report is written to `<project path>/.seethru/report.html`, and that directory is ignored by git automatically. The report opens as a single file without any outside requests, and every secret it finds is masked so the raw value never appears.
+
+By default seethru only reads files. It runs or sends something only when you name it with an option, and it prints what it is about to run first.
 
 All options, `seethru.toml`, finding IDs, exit codes, and the notes for each kind of project (Next and Vite, Supabase, C, C++ and firmware, Rust, SARIF results) are in [USAGE.md](USAGE.md).
 
@@ -46,11 +48,22 @@ All options, `seethru.toml`, finding IDs, exit codes, and the notes for each kin
 | Secret-dependent division | In compiled Rust code, a division of a value the code wipes after use, which leaks the value through timing          |
 | Checks that can stop a program | In compiled Rust code of a kernel, firmware or FFI library, a check that panics on a value from an exported entry point |
 | Cargo dependencies        | Git and `*` dependencies that are not fixed to one version in a project with no `Cargo.lock`                         |
+| Removed memory wipes      | In a built Rust program, a line that clears memory in the source and has no code in the program. Needs `--tool`      |
+| Security headers          | On the first page of a running app you own, a missing content security policy, `nosniff`, frame protection or HSTS. Needs `--probe` |
+| Open CORS                 | A running app you own that lets any site read its answers with the visitor's cookies. Needs `--probe`                |
 | Missing table schema      | Tables the code queries that no SQL file in the repo creates, so their RLS cannot be checked                         |
+
+## Beyond reading files
+
+Each of these is off until you turn it on with an option.
+
+- **Built programs.** `seethru scan . --build --tool objdump --tool dwarfdump` checks whether the memory wipes in your Rust source are still in the program the compiler made. `--tool` names the outside tools seethru may run. See [USAGE.md](USAGE.md#checking-that-memory-wipes-are-still-in-the-built-program).
+- **A running app.** `seethru own URL` gives you one line to put on your app. After that, `seethru scan . --probe URL --staging --tool curl` checks the security headers and CORS of its first page with a few slow, read-only requests, and writes every request to an audit log first. See [USAGE.md](USAGE.md#checking-a-running-app).
+- **Coding agents (MCP).** `seethru mcp --root DIR` lets an agent such as Claude Code or Cursor scan a folder and read the findings. Only the flags you start it with decide what may run. The agent cannot change them. See [USAGE.md](USAGE.md#using-seethru-from-a-coding-agent-mcp).
 
 ## Agent skill
 
-This repository is also a Claude Code plugin marketplace. The `seethru` plugin adds a skill that lets a coding agent run a scan, read the report, fix the findings in order and rescan to prove the fix. Install it inside Claude Code with `/plugin install seethru --marketplace Quant-TheodoreFelix/seethru`. Other install, update and removal commands are in [USAGE.md](USAGE.md#agent-skill).
+This repository is also a Claude Code plugin marketplace. The `seethru` plugin adds a skill that lets a coding agent run a scan, read the report, fix the findings in order and rescan to prove the fix. The skill makes the agent ask you before every step that builds, runs an outside tool or checks a running app. Install it inside Claude Code with `/plugin install seethru --marketplace Quant-TheodoreFelix/seethru`. Other install, update and removal commands are in [USAGE.md](USAGE.md#agent-skill).
 
 ## Safety by design
 
@@ -63,6 +76,8 @@ This repository is also a Claude Code plugin marketplace. The `seethru` plugin a
 5. **No collection of real user data**: Real data exposed during a reproduction is masked and never stored.
 6. **Audit log**: Every check request is logged and can be reviewed by the user.
 7. **Staging first**: Checking production requires explicit confirmation.
+
+The check of a running app follows all seven today. Ownership is proved with a file under `/.well-known/` (the DNS TXT method is not built yet), only `GET` requests are sent, and test accounts are not used yet. The details are in [USAGE.md](USAGE.md#checking-a-running-app).
 
 ## Tech stack
 
