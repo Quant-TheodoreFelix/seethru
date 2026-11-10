@@ -79,8 +79,9 @@ Options
 Proving an app is yours
   seethru own URL [PATH]
                Prints the address and the one line the app must serve before
-               seethru will check it. Sends nothing. The line is kept in
-               PATH/.seethru/ownership
+               seethru will check it. Sends nothing. The line is safe to
+               publish. The secret it is made from stays on this computer in
+               PATH/.seethru/ownership, and checks only work from there
 
 MCP server (for coding agents, over standard input and output)
   --root DIR   A folder the agent may scan. Can be given more than once.
@@ -465,6 +466,18 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(target) = &sarif_out {
                 let sarif = seethru_report::render_sarif(&report, lang)?;
                 write_report(target, &sarif)?;
+                let left_out = seethru_report::sarif_left_out(&report);
+                if left_out > 0 {
+                    let note = match lang {
+                        Lang::En => format!(
+                            "note: {left_out} finding(s) on the running app are not in the SARIF file, because SARIF results need a file and line. They are in the report"
+                        ),
+                        Lang::Ko => format!(
+                            "참고: 실행 중인 앱에서 찾은 문제 {left_out}개는 SARIF 파일에 넣지 않았어요. SARIF 결과에는 파일과 줄이 있어야 해요. 리포트에는 들어 있어요"
+                        ),
+                    };
+                    let _ = writeln!(io::stderr(), "{note}");
+                }
             }
             if json {
                 serde_json::to_writer_pretty(&mut stdout, &report)?;
@@ -649,7 +662,7 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
         };
         let note = confidence_note(finding.confidence, lang);
         writeln!(out, "[{label}] {}{note}", finding.title.get(lang))?;
-        writeln!(out, "  {}", place(finding))?;
+        writeln!(out, "  {}", place(finding, lang))?;
     }
     if !accepted.is_empty() {
         let (heading, label, reason) = match lang {
@@ -659,7 +672,7 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
         writeln!(out, "\n{heading}")?;
         for finding in accepted {
             writeln!(out, "[{label}] {}", finding.title.get(lang))?;
-            writeln!(out, "  {}", place(finding))?;
+            writeln!(out, "  {}", place(finding, lang))?;
             if let Some(acceptance) = &finding.accepted {
                 writeln!(out, "  {reason}: {}", acceptance.reason)?;
             }
@@ -678,12 +691,19 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
     Ok(())
 }
 
-fn place(finding: &seethru_core::Finding) -> String {
-    finding
-        .location
-        .as_ref()
-        .map(|l| format!("{}:{}:{}", l.path, l.line, l.column))
-        .unwrap_or_default()
+fn place(finding: &seethru_core::Finding, lang: Lang) -> String {
+    if let Some(l) = &finding.location {
+        return format!("{}:{}:{}", l.path, l.line, l.column);
+    }
+    match (&finding.proof, lang) {
+        (Some(proof), Lang::En) => {
+            format!("the running app, proof in {REPORT_DIR}/{}", proof.as_str())
+        }
+        (Some(proof), Lang::Ko) => {
+            format!("실행 중인 앱, 증거는 {REPORT_DIR}/{}", proof.as_str())
+        }
+        (None, _) => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -848,6 +868,29 @@ mod tests {
         assert!(ko.contains("[치명적] RLS가 꺼져 있어요 (추정)"), "{ko}");
         assert!(
             ko.contains("\n확인하지 못한 것\n- 빌드 결과물을 읽지 않았어요.\n"),
+            "{ko}"
+        );
+    }
+
+    #[test]
+    fn summary_says_where_the_proof_of_a_running_app_finding_is() {
+        let mut report = one_finding_report();
+        if let Some(finding) = report.findings.first_mut() {
+            finding.location = None;
+            finding.proof = Some(seethru_core::ProofRef::new("proof/a.json"));
+        }
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::En).is_ok());
+        let en = String::from_utf8(out).unwrap_or_default();
+        assert!(
+            en.contains("\n  the running app, proof in .seethru/proof/a.json\n"),
+            "{en}"
+        );
+        let mut out = Vec::new();
+        assert!(print_summary(&mut out, &report, Lang::Ko).is_ok());
+        let ko = String::from_utf8(out).unwrap_or_default();
+        assert!(
+            ko.contains("\n  실행 중인 앱, 증거는 .seethru/proof/a.json\n"),
             "{ko}"
         );
     }

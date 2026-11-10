@@ -1229,8 +1229,8 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "`curl`을 쓰지 못해서 아무것도 보내지 않았고 실행 중인 앱은 점검하지 않았어요. 도구를 찾지 못했거나, seethru가 아는 curl처럼 답하지 않았어요. 다른 곳에 설치돼 있으면 `--tool curl=경로`로 전체 경로를 알려 주세요.",
         ),
         LimitationCode::OwnershipNotVerified => (
-            "seethru could not confirm that this app is yours, so it was not checked. seethru only sends requests to an app that serves the ownership file seethru made for it. Run `seethru own URL`, put the file it shows on the app, deploy, and scan again. If the file was there before, it may have been removed or changed.",
-            "이 앱이 사용자의 것인지 확인하지 못해서 점검하지 않았어요. seethru는 자기가 만들어 준 소유 확인 파일을 내주는 앱에만 요청을 보내요. `seethru own URL`을 실행하고, 안내하는 파일을 앱에 올려 배포한 뒤 다시 검사하세요. 전에 올려 둔 파일이 지워졌거나 바뀌었을 수도 있어요.",
+            "seethru could not confirm that this app is yours, so it was not checked. seethru only sends requests to an app that serves the ownership file seethru made for it. Run `seethru own URL`, put the file it shows on the app, deploy, and scan again. If the file was there before, it may have been removed or changed. The check also has to run on the project folder where `seethru own` was run, because the secret that matches the file is kept there in `.seethru/ownership`.",
+            "이 앱이 사용자의 것인지 확인하지 못해서 점검하지 않았어요. seethru는 자기가 만들어 준 소유 확인 파일을 내주는 앱에만 요청을 보내요. `seethru own URL`을 실행하고, 안내하는 파일을 앱에 올려 배포한 뒤 다시 검사하세요. 전에 올려 둔 파일이 지워졌거나 바뀌었을 수도 있어요. 그리고 `seethru own`을 실행했던 프로젝트 폴더에서 검사해야 해요. 파일과 짝이 되는 비밀 값이 그 폴더의 `.seethru/ownership`에 있기 때문이에요.",
         ),
         LimitationCode::ProbeTargetNotResponding => (
             "The running app stopped answering, answered in a way seethru could not read, or answered from an address seethru does not send to, so the check ended early. What was found before that is still shown. The record of every request is in `.seethru/audit.jsonl`.",
