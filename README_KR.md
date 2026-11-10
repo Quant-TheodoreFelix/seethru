@@ -171,6 +171,36 @@ $ seethru scan . --sarif-out seethru.sarif
 - `--sarif-out`은 seethru의 탐지를 SARIF로 저장합니다. GitHub code scanning에 올릴 때 쓸 수 있습니다. 허용한 탐지는 숨김으로 표시됩니다. 다른 검사 도구에서 온 결과는 다시 쓰지 않습니다.
 - Joern의 `joern-scan`은 텍스트만 출력하고 SARIF 옵션이 없습니다. Joern은 `cpg.finding.toSarifJson()`을 부르는 스크립트로 SARIF를 내보냅니다. 방법은 Joern 저장소의 `tests/test-sarif.sc`에 있습니다.
 
+## 에이전트 스킬
+
+이 저장소는 Claude Code 플러그인 마켓플레이스이기도 합니다. `seethru` 플러그인은 코딩 에이전트가 검사를 실행하고, 리포트를 읽고, 탐지를 순서대로 고친 뒤 다시 검사해 확인하게 하는 스킬을 더합니다.
+
+Claude Code 안에서 설치합니다.
+
+```
+/plugin install seethru --marketplace Quant-TheodoreFelix/seethru
+```
+
+이전 버전에서는 마켓플레이스를 먼저 추가합니다.
+
+```
+/plugin marketplace add Quant-TheodoreFelix/seethru
+/plugin install seethru@seethru
+```
+
+업데이트합니다.
+
+```
+/plugin marketplace update seethru
+/plugin update seethru@seethru
+```
+
+터미널에서는 같은 명령을 `claude plugin marketplace add`, `claude plugin install`, `claude plugin marketplace update`, `claude plugin update`로 실행합니다. 업데이트한 뒤에는 Claude Code를 다시 시작하세요. 지우려면 `/plugin uninstall seethru@seethru`를 실행합니다.
+
+- 에이전트에게 seethru로 프로젝트를 검사해 달라고 하거나 `/seethru:seethru`로 부릅니다.
+- 스킬에는 검사기가 들어 있지 않습니다. [사용법](#사용법)대로 seethru를 빌드한 뒤 `SEETHRU_BIN`을 `target/release/seethru`로 지정하거나, 그 파일을 `PATH`에 두세요.
+- 플러그인 없이 쓰려면 `plugins/seethru/skills/seethru` 폴더를 `~/.claude/skills/`에 복사하세요.
+
 ## 안전 설계
 
 **seethru는 공격 도구가 아닙니다.** 아래 원칙은 선택 사항이 아니라 *모든 기능*에 적용되는 필수 요구사항입니다.
@@ -207,6 +237,7 @@ $ seethru scan . --sarif-out seethru.sarif
 | `web`                     | Security Map, Proof Replay 웹 UI                       |
 | `schema`                  | 스캔 리포트 JSON Schema                                |
 | `fixtures`                | 테스트용 취약 예제 프로젝트 (실제 키 없음)             |
+| `plugins`                 | 에이전트 스킬. `.claude-plugin/marketplace.json`으로 배포 |
 
 ## 기여하기
 

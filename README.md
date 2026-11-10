@@ -169,6 +169,36 @@ $ seethru scan . --sarif-out seethru.sarif
 - `--sarif-out` writes seethru's own findings as SARIF, for example for GitHub code scanning. Accepted findings are marked as suppressed. Results that came from another scanner are not written again.
 - Joern's `joern-scan` prints text and has no SARIF option. Joern exports SARIF from a script that calls `cpg.finding.toSarifJson()`. The `tests/test-sarif.sc` file in the Joern repository shows how.
 
+## Agent skill
+
+This repository is also a Claude Code plugin marketplace. The `seethru` plugin adds a skill that lets a coding agent run a scan, read the report, fix the findings in order and rescan to prove the fix.
+
+Install it inside Claude Code:
+
+```
+/plugin install seethru --marketplace Quant-TheodoreFelix/seethru
+```
+
+On older versions, add the marketplace first:
+
+```
+/plugin marketplace add Quant-TheodoreFelix/seethru
+/plugin install seethru@seethru
+```
+
+Update it:
+
+```
+/plugin marketplace update seethru
+/plugin update seethru@seethru
+```
+
+The same commands work from a terminal as `claude plugin marketplace add`, `claude plugin install`, `claude plugin marketplace update` and `claude plugin update`. Restart Claude Code after an update. Remove it with `/plugin uninstall seethru@seethru`.
+
+- Use it by asking the agent to scan a project with seethru, or with `/seethru:seethru`.
+- The skill does not ship the scanner. Build seethru as shown in [Usage](#usage), then set `SEETHRU_BIN` to `target/release/seethru`, or put that file on your `PATH`.
+- To use the skill without the plugin system, copy `plugins/seethru/skills/seethru` into `~/.claude/skills/`.
+
 ## Safety by design
 
 **seethru is not an attack tool.** The principles below are not optional. They are required for *every feature*.
@@ -205,6 +235,7 @@ Designed for Zero-Trust and Air-Gapped environments, favoring a single binary an
 | `web`                     | Web UI for Security Map and Proof Replay                              |
 | `schema`                  | JSON Schema of the scan report                                        |
 | `fixtures`                | Deliberately vulnerable sample projects for tests (no real keys)      |
+| `plugins`                 | Agent skill, published through `.claude-plugin/marketplace.json`      |
 
 ## Contributing
 
