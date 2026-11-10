@@ -74,8 +74,16 @@ export type EdgeKind = (typeof EDGE_KINDS)[number];
 const ECOSYSTEMS = ["next", "vite", "supabase", "espIdf", "zephyr", "platformIo", "arduino", "cargo"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase", "compiledOutput"] as const;
+const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase", "compiledOutput", "binary"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
+
+const BINARY_FORMATS = ["elf", "machO"] as const;
+export type BinaryFormat = (typeof BINARY_FORMATS)[number];
+
+export interface ToolUse {
+  name: string;
+  version: string;
+}
 
 const BUILD_TOOLS = ["vite", "next"] as const;
 export type BuildTool = (typeof BUILD_TOOLS)[number];
@@ -85,9 +93,10 @@ export type TargetInput =
   | { type: "buildOutput"; path: string; tool: BuildTool }
   | { type: "sarif"; path: string; engine: string; results: number; dropped: number }
   | { type: "compileDatabase"; path: string; files: number }
-  | { type: "compiledOutput"; path: string; files: number; functions: number; machineCode: boolean };
+  | { type: "compiledOutput"; path: string; files: number; functions: number; machineCode: boolean }
+  | { type: "binary"; path: string; format: BinaryFormat; tools: ToolUse[]; lines: number };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound", "binaryToolNotPermitted", "binaryToolFailed", "binaryNotFound", "binaryWithoutLineInfo", "binaryWipesNotConfirmed", "binaryChecksPartial"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -148,6 +157,7 @@ export interface Origin {
   engine: string;
   inputs: InputKind[];
   rule?: string;
+  tools?: string[];
 }
 
 export interface Finding {
@@ -172,7 +182,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -437,7 +447,7 @@ export function parseScanReport(input: unknown): ScanReport {
       "fixPrompt",
       "accepted",
     ]);
-    const origin = object(o.origin, `${path}.origin`, ["engine", "inputs", "rule"]);
+    const origin = object(o.origin, `${path}.origin`, ["engine", "inputs", "rule", "tools"]);
     const finding: Finding = {
       id: text(o.id, `${path}.id`),
       rule: text(o.rule, `${path}.rule`),
@@ -461,6 +471,13 @@ export function parseScanReport(input: unknown): ScanReport {
           oneOf(value, `${path}.origin.inputs[${j}]`, INPUT_KINDS),
         ),
         ...(origin.rule === undefined ? {} : { rule: text(origin.rule, `${path}.origin.rule`) }),
+        ...(origin.tools === undefined
+          ? {}
+          : {
+              tools: list(origin.tools, `${path}.origin.tools`, MAX_LIST).map((value, j) =>
+                text(value, `${path}.origin.tools[${j}]`),
+              ),
+            }),
       },
       cwe: list(o.cwe, `${path}.cwe`, MAX_CWE).map((value, j) => count(value, `${path}.cwe[${j}]`)),
     };
@@ -506,6 +523,20 @@ export function parseScanReport(input: unknown): ScanReport {
             files: count(o.files, `${path}.files`),
             functions: count(o.functions, `${path}.functions`),
             machineCode: flag(o.machineCode, `${path}.machineCode`),
+          };
+        }
+        if (kind === "binary") {
+          const o = object(value, path, ["type", "path", "format", "tools", "lines"]);
+          return {
+            type: "binary",
+            path: text(o.path, `${path}.path`),
+            format: oneOf(o.format, `${path}.format`, BINARY_FORMATS),
+            tools: list(o.tools, `${path}.tools`, MAX_LIST).map((entry, j): ToolUse => {
+              const toolPath = `${path}.tools[${j}]`;
+              const t = object(entry, toolPath, ["name", "version"]);
+              return { name: text(t.name, `${toolPath}.name`), version: text(t.version, `${toolPath}.version`) };
+            }),
+            lines: count(o.lines, `${path}.lines`),
           };
         }
         if (kind === "sarif") {

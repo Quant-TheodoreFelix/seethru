@@ -13,7 +13,7 @@ import {
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -202,8 +202,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 9 }), /version 10 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 11 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 10 }), /version 11 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 12 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -290,6 +290,31 @@ test("reads compiled output inputs and package units", () => {
   assert.deepEqual(parsed.target.inputs[1], input);
   assert.deepEqual(parsed.findings[0]?.origin.inputs, ["source", "compiledOutput"]);
   report.target.inputs = [{ type: "compiledOutput", path: "target/ir", files: 2, functions: 40 }];
+  assert.throws(() => parseScanReport(report), ReportError);
+});
+
+test("reads a built program that an outside tool was run on", () => {
+  const report = validReport();
+  const [finding] = report.findings;
+  assert.ok(finding);
+  const input = {
+    type: "binary",
+    path: ".seethru/build/root/release/vault",
+    format: "machO",
+    tools: [{ name: "dwarfdump", version: "21.0.0" }, { name: "objdump", version: "21.0.0" }],
+    lines: 12,
+  };
+  report.target.inputs = [{ type: "source" }, input];
+  report.target.limitations = [{ code: "binaryChecksPartial", text: { en: "l", ko: "한계" } }];
+  report.findings = [
+    { ...finding, rule: "memory-wipe-removed", origin: { engine: "seethru", inputs: ["source", "binary"], tools: ["dwarfdump", "objdump"] } },
+  ];
+  const parsed = parseScanReport(report);
+  assert.deepEqual(parsed.target.inputs[1], input);
+  assert.deepEqual(parsed.findings[0]?.origin.tools, ["dwarfdump", "objdump"]);
+  report.target.inputs = [{ type: "source" }, { ...input, format: "pe" }];
+  assert.throws(() => parseScanReport(report), ReportError);
+  report.target.inputs = [{ type: "source" }, { ...input, tools: [{ name: "objdump", version: "1", path: "/x" }] }];
   assert.throws(() => parseScanReport(report), ReportError);
 });
 

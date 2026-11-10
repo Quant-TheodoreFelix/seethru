@@ -182,6 +182,11 @@ const en: Messages = {
           : [],
       ),
       ...inputs.flatMap((input) =>
+        input.type === "binary"
+          ? [`built program ${input.path} read with ${input.tools.map((tool) => `${tool.name} ${tool.version}`).join(", ")}`]
+          : [],
+      ),
+      ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [
               `${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}` +
@@ -314,6 +319,11 @@ const ko: Messages = {
       ...inputs.flatMap((input) =>
         input.type === "compiledOutput"
           ? [`${input.path}에서 컴파일된 함수 ${input.functions}개 읽음` + (input.machineCode ? "" : " (기계어 없음)")]
+          : [],
+      ),
+      ...inputs.flatMap((input) =>
+        input.type === "binary"
+          ? [`빌드된 프로그램 ${input.path}을(를) ${input.tools.map((tool) => `${tool.name} ${tool.version}`).join(", ")}(으)로 읽음`]
           : [],
       ),
       ...inputs.flatMap((input) =>
