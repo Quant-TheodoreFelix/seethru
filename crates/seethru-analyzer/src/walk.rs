@@ -16,6 +16,9 @@ pub(crate) const SKIPPED_DIRS: &[&str] = &[
     ".pnpm-store",
     ".yarn",
     ".seethru",
+    ".pio",
+    "managed_components",
+    "CMakeFiles",
 ];
 
 const BINARY_PROBE_BYTES: usize = 8192;

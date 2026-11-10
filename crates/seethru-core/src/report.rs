@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,6 +49,10 @@ pub enum Ecosystem {
     Next,
     Vite,
     Supabase,
+    EspIdf,
+    Zephyr,
+    PlatformIo,
+    Arduino,
 }
 
 #[derive(
@@ -72,6 +76,10 @@ pub enum Input {
         results: u32,
         dropped: u32,
     },
+    CompileDatabase {
+        path: String,
+        files: u32,
+    },
 }
 
 #[derive(
@@ -91,6 +99,7 @@ pub enum InputKind {
     Source,
     BuildOutput,
     Sarif,
+    CompileDatabase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -111,6 +120,8 @@ pub enum LimitationCode {
     DashboardPoliciesUnseen,
     ExternalNotVerified,
     ExternalResultsDropped,
+    FirmwareProtectionNotChecked,
+    NativeCodePartlyRead,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -400,6 +411,7 @@ pub enum AccessRuleDetail {
 )]
 pub enum ConfigDetail {
     EnvVar { exposed_to_client: bool },
+    BuildOption { value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -556,6 +568,11 @@ pub enum RuleId {
     SupabaseStoragePolicyUnrestricted,
     SupabaseServiceRoleUnguarded,
     External,
+    FirmwareInsecureOptionOn,
+    FirmwareOtaOverHttp,
+    FirmwareTlsVerificationOff,
+    FirmwareOtaUnguarded,
+    SecretInNativeCode,
 }
 
 impl RuleId {
@@ -573,6 +590,11 @@ impl RuleId {
             Self::SupabaseStoragePolicyUnrestricted => "supabase-storage-policy-unrestricted",
             Self::SupabaseServiceRoleUnguarded => "supabase-service-role-unguarded",
             Self::External => "external",
+            Self::FirmwareInsecureOptionOn => "firmware-insecure-option-on",
+            Self::FirmwareOtaOverHttp => "firmware-ota-over-http",
+            Self::FirmwareTlsVerificationOff => "firmware-tls-verification-off",
+            Self::FirmwareOtaUnguarded => "firmware-ota-unguarded",
+            Self::SecretInNativeCode => "secret-in-native-code",
         }
     }
 
@@ -584,7 +606,12 @@ impl RuleId {
             Self::SupabaseServiceRoleInBrowser
             | Self::SecretInBrowserCode
             | Self::SecretInSourceCode
-            | Self::SecretInPublicEnvVar => &[798],
+            | Self::SecretInPublicEnvVar
+            | Self::SecretInNativeCode => &[798],
+            Self::FirmwareInsecureOptionOn => &[489],
+            Self::FirmwareOtaOverHttp => &[319, 494],
+            Self::FirmwareTlsVerificationOff => &[295],
+            Self::FirmwareOtaUnguarded => &[306, 494],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing | Self::External => &[],
         }

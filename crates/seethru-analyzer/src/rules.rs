@@ -776,6 +776,191 @@ pub(crate) fn external(engine: &str, rule: &str, cwe: &[u32], path: &str, line: 
     }
 }
 
+pub(crate) struct RiskyOption {
+    pub key: &'static str,
+    pub severity: seethru_core::Severity,
+    pub rule: seethru_core::RuleId,
+    en: &'static str,
+    ko: &'static str,
+}
+
+const fn risky(key: &'static str, high: bool, en: &'static str, ko: &'static str) -> RiskyOption {
+    RiskyOption {
+        key,
+        severity: if high {
+            seethru_core::Severity::High
+        } else {
+            seethru_core::Severity::Medium
+        },
+        rule: seethru_core::RuleId::FirmwareInsecureOptionOn,
+        en,
+        ko,
+    }
+}
+
+pub(crate) const RISKY_OPTIONS: &[RiskyOption] = &[
+    risky(
+        "CONFIG_SECURE_BOOT_INSECURE",
+        true,
+        "It allows secure boot settings that are meant only for testing, so the device may start firmware that is not yours.",
+        "테스트용으로만 쓰는 secure boot 설정을 허용해서, 기기가 내 것이 아닌 펌웨어로 시작할 수 있어요.",
+    ),
+    risky(
+        "CONFIG_SECURE_BOOT_ALLOW_JTAG",
+        true,
+        "It leaves the JTAG debug port open, so someone holding the device can read and change what runs on it.",
+        "JTAG 디버그 포트를 열어 두어서, 기기를 손에 넣은 사람이 실행 중인 내용을 읽고 바꿀 수 있어요.",
+    ),
+    risky(
+        "CONFIG_SECURE_BOOT_ALLOW_ROM_BASIC",
+        true,
+        "It leaves the built-in ROM console available, which gives someone holding the device a way around secure boot.",
+        "칩에 내장된 ROM 콘솔을 쓸 수 있게 두어서, 기기를 손에 넣은 사람이 secure boot를 피해 갈 수 있어요.",
+    ),
+    risky(
+        "CONFIG_SECURE_FLASH_UART_BOOTLOADER_ALLOW_ENC",
+        true,
+        "It lets the serial bootloader write encrypted flash, so someone with a cable can replace the firmware.",
+        "시리얼 부트로더가 암호화된 flash에 쓸 수 있게 해서, 케이블만 있으면 펌웨어를 바꿀 수 있어요.",
+    ),
+    risky(
+        "CONFIG_SECURE_FLASH_UART_BOOTLOADER_ALLOW_DEC",
+        true,
+        "It lets the serial bootloader decrypt flash, so someone with a cable can read the firmware and the secrets stored in it.",
+        "시리얼 부트로더가 flash를 복호화할 수 있게 해서, 케이블만 있으면 펌웨어와 그 안의 비밀 값을 읽을 수 있어요.",
+    ),
+    risky(
+        "CONFIG_SECURE_FLASH_UART_BOOTLOADER_ALLOW_CACHE",
+        true,
+        "It keeps the flash cache on in the serial bootloader, which helps someone with a cable read encrypted flash.",
+        "시리얼 부트로더에서 flash 캐시를 켜 두어서, 케이블로 암호화된 flash를 읽기 쉬워져요.",
+    ),
+    risky(
+        "CONFIG_SECURE_INSECURE_ALLOW_DL_MODE",
+        false,
+        "It keeps the serial download mode open even though security features are on.",
+        "보안 기능을 켰는데도 시리얼 다운로드 모드를 열어 둬요.",
+    ),
+    risky(
+        "CONFIG_BT_NIMBLE_SM_SC_DEBUG_KEYS",
+        true,
+        "It makes Bluetooth pairing use a debug key that everyone knows, so nearby people can read the connection.",
+        "Bluetooth 페어링이 누구나 아는 디버그 키를 쓰게 해서, 근처 사람이 연결 내용을 읽을 수 있어요.",
+    ),
+    risky(
+        "CONFIG_BT_USE_DEBUG_KEYS",
+        true,
+        "It makes Bluetooth pairing use a debug key that everyone knows, so nearby people can read the connection.",
+        "Bluetooth 페어링이 누구나 아는 디버그 키를 쓰게 해서, 근처 사람이 연결 내용을 읽을 수 있어요.",
+    ),
+    risky(
+        "CONFIG_BT_STORE_DEBUG_KEYS",
+        false,
+        "It lets the device keep Bluetooth pairings that were made with a debug key everyone knows.",
+        "누구나 아는 디버그 키로 맺은 Bluetooth 페어링을 기기가 저장하게 해요.",
+    ),
+    risky(
+        "CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE",
+        false,
+        "It lets a new Bluetooth pairing that was not verified replace an existing one, so a nearby device can take over a trusted pairing.",
+        "확인되지 않은 새 Bluetooth 페어링이 기존 페어링을 덮어쓸 수 있어서, 근처 기기가 신뢰된 페어링을 가로챌 수 있어요.",
+    ),
+    RiskyOption {
+        key: "CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP",
+        severity: seethru_core::Severity::High,
+        rule: seethru_core::RuleId::FirmwareOtaOverHttp,
+        en: "It lets firmware updates download over plain HTTP, so someone on the same network can swap the update for their own.",
+        ko: "펌웨어 업데이트를 암호화되지 않은 HTTP로 받을 수 있게 해서, 같은 네트워크의 누군가가 업데이트를 자기 것으로 바꿔치기할 수 있어요.",
+    },
+    RiskyOption {
+        key: "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY",
+        severity: seethru_core::Severity::High,
+        rule: seethru_core::RuleId::FirmwareTlsVerificationOff,
+        en: "It lets the device skip checking the server's certificate, so a fake server would be accepted.",
+        ko: "기기가 서버 인증서 확인을 건너뛸 수 있게 해서, 가짜 서버도 받아들이게 돼요.",
+    },
+];
+
+pub(crate) fn risky_option(option: &RiskyOption, file: &str) -> Text {
+    let key = option.key;
+    let file = display_name(file);
+    Text {
+        title: LocalizedText {
+            en: format!("`{key}` is turned on in `{file}`"),
+            ko: format!("`{file}`에서 `{key}`가 켜져 있어요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "{} If this is only for development, keep it out of the settings you ship.",
+                option.en
+            ),
+            ko: format!(
+                "{} 개발할 때만 쓰는 설정이라면 배포하는 설정에서는 빼세요.",
+                option.ko
+            ),
+        },
+    }
+}
+
+pub(crate) fn secret_in_native(kind: SecretKind, file: &str, firmware: bool) -> Text {
+    let file = display_name(file);
+    let (reach_en, reach_ko) = if firmware {
+        (
+            "Firmware is copied onto every device, and anyone who holds a device or the firmware file can read values written in it.",
+            "펌웨어는 모든 기기에 그대로 들어가고, 기기나 펌웨어 파일을 가진 사람은 그 안에 적힌 값을 읽을 수 있어요.",
+        )
+    } else {
+        (
+            "Values written in a program are visible to everyone who can see the repository or who receives the built program.",
+            "프로그램에 적힌 값은 저장소를 볼 수 있거나 빌드된 프로그램을 받은 모든 사람에게 노출돼요.",
+        )
+    };
+    secret_text(
+        kind,
+        [
+            format!(
+                "`{file}` has {} written in it",
+                secret_label(kind, Lang::En)
+            ),
+            format!(
+                "`{file}` 파일에 비밀 값({})이 직접 적혀 있어요",
+                secret_label(kind, Lang::Ko)
+            ),
+        ],
+        [reach_en, reach_ko],
+        [
+            "Do not build the new key into the program. Load it at run time from storage that is not in the repository.",
+            "새 키는 프로그램에 넣어 빌드하지 말고, 저장소에 없는 저장 공간에서 실행할 때 읽게 하세요.",
+        ],
+    )
+}
+
+pub(crate) fn ota_unguarded(entry: &str, more: usize) -> Text {
+    let entry = display_name(entry);
+    let (more_en, more_ko) = if more > 0 {
+        (
+            format!(" {more} more code paths from this entry point do the same."),
+            format!(" 이 진입점에서 같은 일을 하는 코드 경로가 {more}개 더 있어요."),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("`{entry}` accepts new firmware without checking who is sending it"),
+            ko: format!("`{entry}`가 누가 보내는지 확인하지 않고 새 펌웨어를 받아요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "The handler for `{entry}` writes a firmware update to the device, and no check of the caller was found before that happens. Anyone who can reach the device over the network may be able to replace its firmware.{more_en} Who can reach the device, and whether the chip enforces update signatures, cannot be seen from the code."
+            ),
+            ko: format!(
+                "`{entry}`의 처리 함수가 기기에 펌웨어 업데이트를 쓰는데, 그 전에 부른 쪽을 확인하는 코드를 찾지 못했어요. 네트워크로 기기에 닿을 수 있는 사람이면 누구나 펌웨어를 바꿀 수 있어요.{more_ko} 누가 기기에 닿을 수 있는지, 칩에서 업데이트 서명을 강제하는지는 코드만으로 알 수 없어요."
+            ),
+        },
+    }
+}
+
 pub(crate) fn limitation(code: LimitationCode) -> Limitation {
     let (en, ko) = match code {
         LimitationCode::BuildOutputNotRead => (
@@ -793,6 +978,14 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::DashboardPoliciesUnseen => (
             "Tables and policies made in the Supabase dashboard are not in this repo, so they were not checked.",
             "Supabase 대시보드에서 만든 테이블과 정책은 저장소에 없어서 확인하지 못했어요.",
+        ),
+        LimitationCode::FirmwareProtectionNotChecked => (
+            "For firmware, only settings that are written in the project files were checked. Whether secure boot and flash encryption are on in the shipped device, and whether its fuses were burned, cannot be seen from the files.",
+            "펌웨어는 프로젝트 파일에 적힌 설정만 확인했어요. 실제 기기에서 secure boot와 flash 암호화가 켜져 있는지, 퓨즈가 구워졌는지는 파일만으로 알 수 없어요.",
+        ),
+        LimitationCode::NativeCodePartlyRead => (
+            "C and C++ files were read without building them, so macros, function pointers and generated code were not followed. Missing findings there do not mean the code is safe.",
+            "C와 C++ 파일은 빌드하지 않고 읽었기 때문에 매크로, 함수 포인터, 생성된 코드는 따라가지 못했어요. 그 부분에 탐지가 없다고 안전하다는 뜻은 아니에요.",
         ),
         LimitationCode::ExternalNotVerified => (
             "Results from outside scanners are shown as that scanner reported them. seethru did not check them itself.",
@@ -849,9 +1042,16 @@ mod tests {
             table_schema_missing("orders"),
             service_role_in_browser("VITE_SUPABASE_SERVICE_ROLE_KEY", "VITE_"),
             super::external("semgrep", "c.lang.exec", &[78], "src/net.c", 4),
+            super::secret_in_native(SecretKind::PrivateKey, "main/key.c", true),
+            super::secret_in_native(SecretKind::GithubToken, "src/api.c", false),
+            super::ota_unguarded("POST /api/update", 0),
+            super::ota_unguarded("/update", 2),
             super::external("joern", "call-to-gets", &[], "main.c", 1),
             super::external("gcc", "x", &[99_999], "main.c", 1),
         ];
+        for option in super::RISKY_OPTIONS {
+            texts.push(super::risky_option(option, "sdkconfig.defaults"));
+        }
         for command in COMMANDS {
             for anyone in [true, false] {
                 for login_only in [true, false] {

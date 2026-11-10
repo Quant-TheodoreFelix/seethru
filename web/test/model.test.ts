@@ -4,7 +4,7 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -193,8 +193,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 6 }), /version 7 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 8 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 7 }), /version 8 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 9 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });

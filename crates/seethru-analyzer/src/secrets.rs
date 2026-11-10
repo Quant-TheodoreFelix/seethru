@@ -342,5 +342,30 @@ fn private_key_hit(text: &str, offset: usize) -> Option<Hit> {
     })
 }
 
+pub(crate) fn has_key_body(text: &str, offset: usize) -> bool {
+    let Some(rest) = text.get(offset + "-----BEGIN ".len()..) else {
+        return false;
+    };
+    let Some(header) = rest.find("-----") else {
+        return false;
+    };
+    let Some(body) = rest.get(header + "-----".len()..) else {
+        return false;
+    };
+    let Some(end) = body.find("-----END").filter(|end| *end <= MAX_PEM_SCAN) else {
+        return false;
+    };
+    let mut payload = 0usize;
+    let mut other = 0usize;
+    for c in body[..end].chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=') {
+            payload += 1;
+        } else if !(c.is_whitespace() || matches!(c, '"' | '\\')) {
+            other += 1;
+        }
+    }
+    payload >= MIN_PEM_PAYLOAD && other * 20 <= payload
+}
+
 #[cfg(test)]
 mod tests;

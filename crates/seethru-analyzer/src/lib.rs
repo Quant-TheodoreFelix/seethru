@@ -5,6 +5,7 @@ mod env;
 mod external;
 mod glob;
 mod graph;
+mod native;
 mod resolve;
 mod roles;
 mod rules;
@@ -45,6 +46,7 @@ pub enum ScanError {
     Config(String),
     BuildOutput(String),
     Sarif(String),
+    CompileCommands(String),
 }
 
 impl fmt::Display for ScanError {
@@ -55,6 +57,9 @@ impl fmt::Display for ScanError {
             Self::Config(message) => write!(f, "cannot use {CONFIG_FILE}: {message}"),
             Self::BuildOutput(message) => write!(f, "cannot use the build output: {message}"),
             Self::Sarif(message) => write!(f, "cannot use the SARIF file: {message}"),
+            Self::CompileCommands(message) => {
+                write!(f, "cannot use the compile database: {message}")
+            }
         }
     }
 }
@@ -66,6 +71,7 @@ pub struct ScanOptions {
     pub read_config: bool,
     pub build_output: Option<PathBuf>,
     pub sarif: Vec<PathBuf>,
+    pub compile_commands: Option<PathBuf>,
 }
 
 impl Default for ScanOptions {
@@ -74,6 +80,7 @@ impl Default for ScanOptions {
             read_config: true,
             build_output: None,
             sarif: Vec::new(),
+            compile_commands: None,
         }
     }
 }
@@ -98,6 +105,11 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         .as_deref()
         .map(|given| build_output::locate(&root, given))
         .transpose()?;
+    let compiled = options
+        .compile_commands
+        .as_deref()
+        .map(|given| native::compile_db::read(&root, given))
+        .transpose()?;
     let walked = walk::walk(&root, classify::is_wanted, |rel_path| {
         config
             .as_ref()
@@ -113,6 +125,8 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut configs = Vec::new();
     let mut script_paths = BTreeMap::new();
     let mut flows = Vec::new();
+    let mut native_sources = Vec::new();
+    let mut option_files = Vec::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
     let mut uses_supabase = false;
@@ -167,6 +181,20 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             });
             scripts.push(ScriptRecord::new(&entry.rel_path, &lines, facts));
         }
+        if class.content == Content::Native {
+            native_sources.push(native::Source {
+                rel_path: entry.rel_path.clone(),
+                role: class.role,
+                root: hints
+                    .firmware_root_for(&entry.rel_path)
+                    .unwrap_or_default()
+                    .to_owned(),
+                facts: native::collect(&entry.rel_path, &text),
+            });
+        }
+        if class.content == Content::Kconfig {
+            option_files.push((entry.rel_path.clone(), text.clone()));
+        }
         if let Some(record) = SecretRecord::new(&entry.rel_path, class, &text) {
             secret_records.push(record);
         }
@@ -211,6 +239,10 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         record.emit(&mut graph, &assigned);
     }
     trace::emit(&flows, &resolver, &hints, &mut graph, &assigned_of);
+    for (rel_path, text) in &option_files {
+        native::emit_options(rel_path, text, &mut graph);
+    }
+    native::emit(&native_sources, &mut graph);
     if let Some(build) = &build {
         for route in &build.routes {
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
@@ -320,6 +352,20 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     if uses_supabase {
         limitations.push(rules::limitation(LimitationCode::DashboardPoliciesUnseen));
     }
+    if hints.has_firmware() {
+        limitations.push(rules::limitation(
+            LimitationCode::FirmwareProtectionNotChecked,
+        ));
+    }
+    if !native_sources.is_empty() {
+        limitations.push(rules::limitation(LimitationCode::NativeCodePartlyRead));
+    }
+    if let Some(compiled) = &compiled {
+        inputs.push(Input::CompileDatabase {
+            path: compiled.rel.clone(),
+            files: u32::try_from(compiled.files.len()).unwrap_or(u32::MAX),
+        });
+    }
     if let Some((imported, dropped)) = imported {
         limitations.push(rules::limitation(LimitationCode::ExternalNotVerified));
         if imported.dropped || dropped {
@@ -344,6 +390,21 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         inputs,
         limitations,
     });
+    if let Some(compiled) = compiled.filter(|compiled| !compiled.files.is_empty()) {
+        for finding in &mut report.findings {
+            let native = matches!(
+                finding.rule,
+                RuleId::SecretInNativeCode | RuleId::FirmwareOtaUnguarded
+            );
+            let built = finding.location.as_ref().is_none_or(|location| {
+                !classify::is_native_source(&location.path)
+                    || compiled.files.contains(&location.path)
+            });
+            if native && !built {
+                finding.confidence = Confidence::Review;
+            }
+        }
+    }
     if let Some(config) = &config {
         for finding in &mut report.findings {
             finding.accepted = config.acceptance(finding);
@@ -505,7 +566,14 @@ impl SecretRecord {
             class.content == Content::Env && !env::is_template_file(classify::file_name(rel_path));
         let lines = Lines::new(text);
         let mut hits = Vec::new();
+        let native = matches!(class.content, Content::Native | Content::Kconfig);
         for hit in found {
+            if native
+                && hit.kind == seethru_core::SecretKind::PrivateKey
+                && !secrets::has_key_body(text, hit.offset)
+            {
+                continue;
+            }
             let public_var = if real_env_file {
                 match env::var_at(text, hit.offset) {
                     Some(var) if env::is_public(var) => Some(var.to_owned()),
@@ -567,6 +635,21 @@ impl SecretRecord {
                     },
                     rules::secret_in_browser(hit.kind, rel_path),
                 ),
+                _ if matches!(
+                    role,
+                    FileRole::NativeCode | FileRole::FirmwareCode | FileRole::BuildConfig
+                ) =>
+                {
+                    (
+                        Verdict {
+                            rule: RuleId::SecretInNativeCode,
+                            severity: Severity::High,
+                            confidence: Confidence::Certain,
+                            from_build: false,
+                        },
+                        rules::secret_in_native(hit.kind, rel_path, role != FileRole::NativeCode),
+                    )
+                }
                 _ => (
                     Verdict {
                         rule: RuleId::SecretInSourceCode,

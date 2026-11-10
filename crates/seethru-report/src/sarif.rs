@@ -234,6 +234,26 @@ fn rule_text(rule: RuleId, lang: Lang) -> &'static str {
             "A route, server action or Edge Function uses the service_role key without checking who is calling.",
             "route, server action, Edge Function이 누가 부르는지 확인하지 않고 service_role 키를 써요.",
         ),
+        RuleId::FirmwareInsecureOptionOn => (
+            "A firmware setting that is meant only for testing is turned on.",
+            "테스트용으로만 쓰는 펌웨어 설정이 켜져 있어요.",
+        ),
+        RuleId::FirmwareOtaOverHttp => (
+            "Firmware updates are allowed to download over plain HTTP.",
+            "펌웨어 업데이트를 암호화되지 않은 HTTP로 받을 수 있어요.",
+        ),
+        RuleId::FirmwareTlsVerificationOff => (
+            "The firmware is allowed to skip checking the server's certificate.",
+            "펌웨어가 서버 인증서 확인을 건너뛸 수 있어요.",
+        ),
+        RuleId::FirmwareOtaUnguarded => (
+            "An entry point of the firmware accepts a firmware update without checking who is sending it.",
+            "펌웨어의 진입점이 누가 보내는지 확인하지 않고 펌웨어 업데이트를 받아요.",
+        ),
+        RuleId::SecretInNativeCode => (
+            "A secret value is written in C or C++ code that is built into a program or firmware.",
+            "프로그램이나 펌웨어로 빌드되는 C, C++ 코드에 비밀 값이 적혀 있어요.",
+        ),
         RuleId::External => (
             "A result reported by an outside scanner.",
             "외부 검사 도구가 알린 결과예요.",

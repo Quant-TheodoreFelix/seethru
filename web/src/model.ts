@@ -71,10 +71,10 @@ export const EDGE_KINDS = [
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
-const ECOSYSTEMS = ["next", "vite", "supabase"] as const;
+const ECOSYSTEMS = ["next", "vite", "supabase", "espIdf", "zephyr", "platformIo", "arduino"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source", "buildOutput", "sarif"] as const;
+const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
 
 const BUILD_TOOLS = ["vite", "next"] as const;
@@ -83,9 +83,10 @@ export type BuildTool = (typeof BUILD_TOOLS)[number];
 export type TargetInput =
   | { type: "source" }
   | { type: "buildOutput"; path: string; tool: BuildTool }
-  | { type: "sarif"; path: string; engine: string; results: number; dropped: number };
+  | { type: "sarif"; path: string; engine: string; results: number; dropped: number }
+  | { type: "compileDatabase"; path: string; files: number };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -99,7 +100,7 @@ export type DataStoreDetail =
   | { type: "postgresView"; schema: string; securityInvoker: boolean; materialized: boolean }
   | { type: "storageBucket"; visibility: BucketVisibility };
 export type AccessRuleDetail = { type: "postgresPolicy"; command: PolicyCommand; roles: string[] };
-export type ConfigDetail = { type: "envVar"; exposedToClient: boolean };
+export type ConfigDetail = { type: "envVar"; exposedToClient: boolean } | { type: "buildOption"; value: string };
 export type CredentialDetail = { type: "secret"; secretKind: SecretKind; masked: string };
 
 export type NodeKind =
@@ -170,7 +171,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -303,7 +304,12 @@ function accessRuleDetail(value: unknown, path: string): AccessRuleDetail {
 }
 
 function configDetail(value: unknown, path: string): ConfigDetail {
-  if (tagOf(value, path) !== "envVar") fail(`${path}.type`, "known detail type expected");
+  const tag = tagOf(value, path);
+  if (tag === "buildOption") {
+    const o = object(value, path, ["type", "value"]);
+    return { type: "buildOption", value: text(o.value, `${path}.value`) };
+  }
+  if (tag !== "envVar") fail(`${path}.type`, "known detail type expected");
   const o = object(value, path, ["type", "exposedToClient"]);
   return { type: "envVar", exposedToClient: flag(o.exposedToClient, `${path}.exposedToClient`) };
 }
@@ -486,6 +492,10 @@ export function parseScanReport(input: unknown): ScanReport {
         if (kind === "source") {
           object(value, path, ["type"]);
           return { type: "source" };
+        }
+        if (kind === "compileDatabase") {
+          const o = object(value, path, ["type", "path", "files"]);
+          return { type: "compileDatabase", path: text(o.path, `${path}.path`), files: count(o.files, `${path}.files`) };
         }
         if (kind === "sarif") {
           const o = object(value, path, ["type", "path", "engine", "results", "dropped"]);

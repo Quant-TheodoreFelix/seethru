@@ -12,6 +12,7 @@ seethru - see through your app before attackers do
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
                [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
+               [--compile-commands FILE]
   seethru schema
   seethru --version
 
@@ -31,6 +32,9 @@ Options
                Can be given up to 8 times. seethru never runs the scanner
   --sarif-out FILE
                Also write what seethru found to FILE in SARIF 2.1.0
+  --compile-commands FILE
+               Read compile_commands.json from FILE, a file inside the project,
+               to learn which C and C++ files are built. Nothing in it is run
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -46,6 +50,7 @@ enum Command {
         build_output: Option<PathBuf>,
         sarif: Vec<PathBuf>,
         sarif_out: Option<PathBuf>,
+        compile_commands: Option<PathBuf>,
     },
     Schema,
     Version,
@@ -75,12 +80,16 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut build_output = None;
             let mut sarif = Vec::new();
             let mut sarif_out: Option<PathBuf> = None;
+            let mut compile_commands = None;
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
                     Long("build-output") => build_output = Some(PathBuf::from(parser.value()?)),
                     Long("sarif") => sarif.push(PathBuf::from(parser.value()?)),
                     Long("sarif-out") => sarif_out = Some(PathBuf::from(parser.value()?)),
+                    Long("compile-commands") => {
+                        compile_commands = Some(PathBuf::from(parser.value()?));
+                    }
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -118,6 +127,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 build_output,
                 sarif,
                 sarif_out,
+                compile_commands,
             })
         }
         "schema" => match parser.next()? {
@@ -177,11 +187,13 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             build_output,
             sarif,
             sarif_out,
+            compile_commands,
         } => {
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
                 sarif,
+                compile_commands,
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
@@ -420,7 +432,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None }) if path.as_os_str() == "." && sarif.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None }) if path.as_os_str() == "." && sarif.is_empty()
         ));
     }
 

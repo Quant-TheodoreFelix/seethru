@@ -132,6 +132,16 @@ impl Graph {
         });
     }
 
+    pub(crate) fn set_exposure(&mut self, id: &NodeId, exposure: seethru_core::Exposure) {
+        if let Some(Node {
+            kind: NodeKind::EntryPoint { exposure: slot, .. },
+            ..
+        }) = self.nodes.get_mut(id)
+        {
+            *slot = exposure;
+        }
+    }
+
     pub(crate) fn has_node(&self, id: &NodeId) -> bool {
         self.nodes.contains_key(id)
     }

@@ -14,6 +14,7 @@ export type ComponentLabel =
   | "buildScript"
   | "migration"
   | "envFile"
+  | "buildConfig"
   | "buildOutput"
   | "serverBuildOutput"
   | "buildCache"
@@ -46,6 +47,7 @@ export interface Messages {
   rlsOff: string;
   policy: string;
   envVar: string;
+  buildOption: string;
   publicInBrowser: string;
   entryPoint: string;
   dataStore: string;
@@ -108,6 +110,7 @@ const en: Messages = {
     buildScript: "Build script",
     migration: "Migration",
     envFile: "Env file",
+    buildConfig: "Build settings",
     buildOutput: "Build output",
     serverBuildOutput: "Server build output",
     buildCache: "Build cache",
@@ -160,6 +163,7 @@ const en: Messages = {
   rlsOff: "RLS off",
   policy: "Policy",
   envVar: "Env variable",
+  buildOption: "Build setting",
   publicInBrowser: "public in browser",
   entryPoint: "Entry point",
   dataStore: "Data store",
@@ -172,6 +176,7 @@ const en: Messages = {
       `${filesScanned} ${filesScanned === 1 ? "file" : "files"} scanned`,
       filesExcluded > 0 ? `${filesExcluded} excluded by ${configFile ?? "seethru.toml"}` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`build output read from ${input.path}`] : [])),
+      ...inputs.flatMap((input) => (input.type === "compileDatabase" ? [`${input.files} built files listed in ${input.path}`] : [])),
       ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [
@@ -236,6 +241,7 @@ const ko: Messages = {
     buildScript: "빌드 스크립트",
     migration: "DB 마이그레이션",
     envFile: "환경변수 파일",
+    buildConfig: "빌드 설정 파일",
     buildOutput: "빌드 결과물",
     serverBuildOutput: "서버 빌드 결과물",
     buildCache: "빌드 캐시",
@@ -288,6 +294,7 @@ const ko: Messages = {
   rlsOff: "RLS 꺼짐",
   policy: "정책",
   envVar: "환경변수",
+  buildOption: "빌드 설정",
   publicInBrowser: "브라우저에 공개",
   entryPoint: "진입점",
   dataStore: "데이터 저장소",
@@ -300,6 +307,7 @@ const ko: Messages = {
       `파일 ${filesScanned}개 검사`,
       filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`${input.path} 빌드 결과물 읽음`] : [])),
+      ...inputs.flatMap((input) => (input.type === "compileDatabase" ? [`${input.path}에 빌드되는 파일 ${input.files}개`] : [])),
       ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [`${input.engine} 결과 ${input.results}개` + (input.dropped > 0 ? ` (${input.dropped}개 뺌)` : "")]
@@ -344,7 +352,7 @@ function componentLabel(kind: Extract<NodeKind, { type: "component" }>): Compone
     case "migration":
       return "migration";
     case "config":
-      return "envFile";
+      return kind.runtime === "build" ? "buildConfig" : "envFile";
     case "buildOutput":
       return kind.runtime === "server" ? "serverBuildOutput" : kind.runtime === "build" ? "buildCache" : "buildOutput";
     case "binary":
@@ -409,7 +417,9 @@ export function kindLabel(kind: NodeKind, m: Messages): string {
     case "credential":
       return `${m.secret[kind.detail.secretKind]} · ${kind.detail.masked}`;
     case "config":
-      return kind.detail ? (kind.detail.exposedToClient ? `${m.envVar} · ${m.publicInBrowser}` : m.envVar) : m.config;
+      if (!kind.detail) return m.config;
+      if (kind.detail.type === "buildOption") return `${m.buildOption} · ${kind.detail.value}`;
+      return kind.detail.exposedToClient ? `${m.envVar} · ${m.publicInBrowser}` : m.envVar;
     case "service":
       return m.service;
   }

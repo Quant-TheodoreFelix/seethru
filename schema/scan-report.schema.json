@@ -118,6 +118,23 @@
             "exposedToClient"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "buildOption",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -217,7 +234,11 @@
       "enum": [
         "next",
         "vite",
-        "supabase"
+        "supabase",
+        "espIdf",
+        "zephyr",
+        "platformIo",
+        "arduino"
       ],
       "type": "string"
     },
@@ -467,6 +488,29 @@
             "dropped"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "files": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "const": "compileDatabase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "files"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -474,7 +518,8 @@
       "enum": [
         "source",
         "buildOutput",
-        "sarif"
+        "sarif",
+        "compileDatabase"
       ],
       "type": "string"
     },
@@ -501,7 +546,9 @@
         "buildOutputWithoutSourceMaps",
         "dashboardPoliciesUnseen",
         "externalNotVerified",
-        "externalResultsDropped"
+        "externalResultsDropped",
+        "firmwareProtectionNotChecked",
+        "nativeCodePartlyRead"
       ],
       "type": "string"
     },
@@ -815,7 +862,12 @@
         "supabase-view-bypasses-rls",
         "supabase-storage-policy-unrestricted",
         "supabase-service-role-unguarded",
-        "external"
+        "external",
+        "firmware-insecure-option-on",
+        "firmware-ota-over-http",
+        "firmware-tls-verification-off",
+        "firmware-ota-unguarded",
+        "secret-in-native-code"
       ],
       "type": "string"
     },

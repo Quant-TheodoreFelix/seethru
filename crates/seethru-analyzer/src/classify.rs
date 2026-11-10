@@ -4,6 +4,11 @@ use seethru_core::{Artifact, Ecosystem, Runtime};
 
 const SCRIPT_EXTENSIONS: &[&str] = &["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"];
 
+const NATIVE_EXTENSIONS: &[&str] = &["c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "ino"];
+
+const NATIVE_BUILD_FILES: &[&str] = &["CMakeLists.txt", "platformio.ini", "meson.build"];
+const NOT_KCONFIG_SUFFIXES: &[&str] = &[".json", ".h", ".old", ".cmake", ".rename"];
+
 const TEXT_EXTENSIONS: &[&str] = &[
     "json",
     "jsonc",
@@ -75,6 +80,8 @@ pub(crate) enum Content {
     Script,
     Env,
     Text,
+    Native,
+    Kconfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -88,6 +95,9 @@ pub(crate) enum FileRole {
     BuildOutput,
     ServerBuildOutput,
     BuildCache,
+    NativeCode,
+    FirmwareCode,
+    BuildConfig,
     Other,
 }
 
@@ -110,15 +120,21 @@ impl FileRole {
             Self::BuildCache => Runtime::Build,
             Self::EdgeFunction => Runtime::Edge,
             Self::Migration => Runtime::Database,
-            Self::UnknownCode | Self::EnvFile | Self::Other => Runtime::Unknown,
+            Self::FirmwareCode => Runtime::Firmware,
+            Self::BuildConfig => Runtime::Build,
+            Self::UnknownCode | Self::NativeCode | Self::EnvFile | Self::Other => Runtime::Unknown,
         }
     }
 
     pub(crate) fn artifact(self) -> Artifact {
         match self {
-            Self::BrowserCode | Self::ServerCode | Self::EdgeFunction | Self::UnknownCode => {
-                Artifact::Source
-            }
+            Self::BrowserCode
+            | Self::ServerCode
+            | Self::EdgeFunction
+            | Self::UnknownCode
+            | Self::NativeCode
+            | Self::FirmwareCode => Artifact::Source,
+            Self::BuildConfig => Artifact::Config,
             Self::Migration => Artifact::Migration,
             Self::EnvFile => Artifact::Config,
             Self::BuildOutput | Self::ServerBuildOutput | Self::BuildCache => Artifact::BuildOutput,
@@ -138,6 +154,11 @@ pub(crate) struct Class {
 pub(crate) struct ProjectHints {
     vite_roots: BTreeSet<String>,
     next_roots: BTreeSet<String>,
+    esp_roots: BTreeSet<String>,
+    zephyr_roots: BTreeSet<String>,
+    pio_roots: BTreeSet<String>,
+    arduino_roots: BTreeSet<String>,
+    native_build_at_root: bool,
 }
 
 pub(crate) fn is_wanted(rel_path: &str) -> bool {
@@ -153,6 +174,19 @@ impl ProjectHints {
                 hints.vite_roots.insert(dir.to_owned());
             } else if NEXT_CONFIGS.contains(&name) {
                 hints.next_roots.insert(dir.to_owned());
+            } else if name == "platformio.ini" {
+                hints.pio_roots.insert(dir.to_owned());
+            } else if is_kconfig(name) {
+                if name.starts_with("sdkconfig") {
+                    hints.esp_roots.insert(dir.to_owned());
+                } else {
+                    hints.zephyr_roots.insert(dir.to_owned());
+                }
+            } else if name.ends_with(".ino") {
+                hints.arduino_roots.insert(dir.to_owned());
+            }
+            if dir.is_empty() && (NATIVE_BUILD_FILES.contains(&name) || is_kconfig(name)) {
+                hints.native_build_at_root = true;
             }
         }
         hints
@@ -161,9 +195,16 @@ impl ProjectHints {
     pub(crate) fn classify(&self, rel_path: &str) -> Option<Class> {
         let content = content_of(file_name(rel_path))?;
         let mut served_as_is = false;
+        if self.native_build_at_root && is_native_build_dir(rel_path) {
+            return None;
+        }
         let role = match content {
             Content::Sql => FileRole::Migration,
             Content::Env => FileRole::EnvFile,
+            Content::Native | Content::Kconfig if is_build_output(rel_path) => return None,
+            Content::Kconfig => FileRole::BuildConfig,
+            Content::Native if self.firmware_root_for(rel_path).is_some() => FileRole::FirmwareCode,
+            Content::Native => FileRole::NativeCode,
             Content::Script | Content::Text if is_build_output(rel_path) => {
                 build_output_role(rel_path)
             }
@@ -189,7 +230,36 @@ impl ProjectHints {
         if !self.vite_roots.is_empty() {
             found.push(Ecosystem::Vite);
         }
+        for (roots, ecosystem) in [
+            (&self.esp_roots, Ecosystem::EspIdf),
+            (&self.zephyr_roots, Ecosystem::Zephyr),
+            (&self.pio_roots, Ecosystem::PlatformIo),
+            (&self.arduino_roots, Ecosystem::Arduino),
+        ] {
+            if !roots.is_empty() {
+                found.push(ecosystem);
+            }
+        }
         found
+    }
+
+    pub(crate) fn firmware_root_for(&self, rel_path: &str) -> Option<&str> {
+        [
+            &self.esp_roots,
+            &self.zephyr_roots,
+            &self.pio_roots,
+            &self.arduino_roots,
+        ]
+        .into_iter()
+        .filter_map(|roots| deepest_root(roots, rel_path))
+        .max_by_key(|root| root.len())
+    }
+
+    pub(crate) fn has_firmware(&self) -> bool {
+        !(self.esp_roots.is_empty()
+            && self.zephyr_roots.is_empty()
+            && self.pio_roots.is_empty()
+            && self.arduino_roots.is_empty())
     }
 
     pub(crate) fn has_many_next_roots(&self) -> bool {
@@ -283,8 +353,14 @@ fn content_of(name: &str) -> Option<Content> {
     if name == ".env" || name.starts_with(".env.") || name.ends_with(".env") {
         return Some(Content::Env);
     }
+    if is_kconfig(name) {
+        return Some(Content::Kconfig);
+    }
     let (_, ext) = name.rsplit_once('.')?;
     let ext = ext.to_ascii_lowercase();
+    if NATIVE_EXTENSIONS.contains(&ext.as_str()) {
+        return Some(Content::Native);
+    }
     if ext == "sql" {
         Some(Content::Sql)
     } else if SCRIPT_EXTENSIONS.contains(&ext.as_str()) {
@@ -294,6 +370,32 @@ fn content_of(name: &str) -> Option<Content> {
     } else {
         None
     }
+}
+
+pub(crate) fn is_native_source(rel_path: &str) -> bool {
+    file_name(rel_path)
+        .rsplit_once('.')
+        .is_some_and(|(_, ext)| {
+            let ext = ext.to_ascii_lowercase();
+            NATIVE_EXTENSIONS.contains(&ext.as_str())
+                && !matches!(ext.as_str(), "h" | "hpp" | "hh" | "hxx")
+        })
+}
+
+pub(crate) fn is_kconfig(name: &str) -> bool {
+    let sdkconfig = name == "sdkconfig"
+        || (name.starts_with("sdkconfig.")
+            && !NOT_KCONFIG_SUFFIXES
+                .iter()
+                .any(|suffix| name.ends_with(suffix)));
+    let zephyr = name == "prj.conf" || (name.starts_with("prj_") && name.ends_with(".conf"));
+    sdkconfig || zephyr
+}
+
+fn is_native_build_dir(rel_path: &str) -> bool {
+    rel_path
+        .split_once('/')
+        .is_some_and(|(first, _)| BUILD_DIRS_AT_ROOT.contains(&first))
 }
 
 fn is_build_output(rel_path: &str) -> bool {
