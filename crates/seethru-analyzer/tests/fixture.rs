@@ -239,12 +239,27 @@ fn supabase_next_fixture_tells_server_code_from_browser_code() {
             ),
         ]
     );
+    let exposure = |id: &str| {
+        report.nodes.iter().find_map(|node| match &node.kind {
+            NodeKind::EntryPoint { exposure, .. } if node.id.as_str() == id => Some(*exposure),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        exposure("entry:httpRoute:/api/stats"),
+        Some(seethru_core::Exposure::Authenticated)
+    );
     let edge = |from: &str, to: &str, kind: EdgeKind| {
         report
             .edges
             .iter()
             .any(|edge| edge.from.as_str() == from && edge.to.as_str() == to && edge.kind == kind)
     };
+    assert!(edge(
+        "entry:httpRoute:/api/stats",
+        "guard:src/lib/auth.ts#requireUser",
+        EdgeKind::GuardedBy
+    ));
     assert!(edge(
         "file:src/lib/admin-server.ts",
         "principal:supabase:service_role",
