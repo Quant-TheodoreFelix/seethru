@@ -777,7 +777,8 @@
         "supabase-table-schema-missing",
         "supabase-function-bypasses-rls",
         "supabase-view-bypasses-rls",
-        "supabase-storage-policy-unrestricted"
+        "supabase-storage-policy-unrestricted",
+        "supabase-service-role-unguarded"
       ],
       "type": "string"
     },

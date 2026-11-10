@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -542,6 +542,7 @@ pub enum RuleId {
     SupabaseFunctionBypassesRls,
     SupabaseViewBypassesRls,
     SupabaseStoragePolicyUnrestricted,
+    SupabaseServiceRoleUnguarded,
 }
 
 impl RuleId {
@@ -557,6 +558,7 @@ impl RuleId {
             Self::SupabaseFunctionBypassesRls => "supabase-function-bypasses-rls",
             Self::SupabaseViewBypassesRls => "supabase-view-bypasses-rls",
             Self::SupabaseStoragePolicyUnrestricted => "supabase-storage-policy-unrestricted",
+            Self::SupabaseServiceRoleUnguarded => "supabase-service-role-unguarded",
         }
     }
 
@@ -569,6 +571,7 @@ impl RuleId {
             | Self::SecretInBrowserCode
             | Self::SecretInSourceCode
             | Self::SecretInPublicEnvVar => &[798],
+            Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing => &[],
         }
     }

@@ -167,7 +167,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
