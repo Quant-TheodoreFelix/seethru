@@ -1,5 +1,7 @@
 mod build_output;
+mod cargo;
 mod classify;
+mod compiled;
 mod config;
 mod env;
 mod external;
@@ -47,6 +49,7 @@ pub enum ScanError {
     BuildOutput(String),
     Sarif(String),
     CompileCommands(String),
+    CompiledOutput(String),
 }
 
 impl fmt::Display for ScanError {
@@ -60,6 +63,9 @@ impl fmt::Display for ScanError {
             Self::CompileCommands(message) => {
                 write!(f, "cannot use the compile database: {message}")
             }
+            Self::CompiledOutput(message) => {
+                write!(f, "cannot use the compiled output: {message}")
+            }
         }
     }
 }
@@ -72,6 +78,7 @@ pub struct ScanOptions {
     pub build_output: Option<PathBuf>,
     pub sarif: Vec<PathBuf>,
     pub compile_commands: Option<PathBuf>,
+    pub llvm_ir: Vec<PathBuf>,
 }
 
 impl Default for ScanOptions {
@@ -81,6 +88,7 @@ impl Default for ScanOptions {
             build_output: None,
             sarif: Vec::new(),
             compile_commands: None,
+            llvm_ir: Vec::new(),
         }
     }
 }
@@ -105,7 +113,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         .as_deref()
         .map(|given| build_output::locate(&root, given))
         .transpose()?;
-    let compiled = options
+    let build_list = options
         .compile_commands
         .as_deref()
         .map(|given| native::compile_db::read(&root, given))
@@ -127,9 +135,11 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     let mut flows = Vec::new();
     let mut native_sources = Vec::new();
     let mut option_files = Vec::new();
+    let mut manifests = Vec::new();
     let mut scanned = 0u32;
     let mut skipped = walked.skipped;
     let mut uses_supabase = false;
+    let mut has_sql = false;
 
     for entry in &walked.entries {
         let Some(class) = hints.classify(&entry.rel_path) else {
@@ -144,6 +154,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             script_paths.insert(entry.rel_path.clone(), class);
         }
         if class.content == Content::Sql {
+            has_sql = true;
             migrations.apply_file(&entry.rel_path, &text);
             uses_supabase |=
                 entry.rel_path.starts_with("supabase/") || entry.rel_path.contains("/supabase/");
@@ -190,6 +201,12 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
                     .unwrap_or_default()
                     .to_owned(),
                 facts: native::collect(&entry.rel_path, &text),
+            });
+        }
+        if cargo::is_manifest(&entry.rel_path) {
+            manifests.push(cargo::Manifest {
+                rel_path: entry.rel_path.clone(),
+                text: text.clone(),
             });
         }
         if class.content == Content::Kconfig {
@@ -243,6 +260,21 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         native::emit_options(rel_path, text, &mut graph);
     }
     native::emit(&native_sources, &mut graph);
+    let workspace = cargo::Workspace::read(&root, &manifests);
+    workspace.emit(&mut graph);
+    let compiled = if options.llvm_ir.is_empty() {
+        None
+    } else {
+        let compiled = compiled::read(&root, &options.llvm_ir, &|rel_path| {
+            config
+                .as_ref()
+                .is_some_and(|config| config.is_excluded(rel_path))
+        })?;
+        compiled::emit(&compiled, &mut graph, &|rel_path| {
+            workspace.package_of(rel_path)
+        });
+        Some(compiled)
+    };
     if let Some(build) = &build {
         for route in &build.routes {
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
@@ -327,8 +359,14 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     if uses_supabase {
         ecosystems.push(Ecosystem::Supabase);
     }
+    if !workspace.is_empty() {
+        ecosystems.push(Ecosystem::Cargo);
+    }
     ecosystems.sort();
     let mut limitations = Vec::new();
+    if ecosystems.is_empty() && modules.is_empty() && native_sources.is_empty() && !has_sql {
+        limitations.push(rules::limitation(LimitationCode::ProjectKindNotRecognized));
+    }
     let mut inputs = vec![Input::Source {}];
     match &build {
         None if !modules.is_empty() => {
@@ -360,7 +398,35 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
     if !native_sources.is_empty() {
         limitations.push(rules::limitation(LimitationCode::NativeCodePartlyRead));
     }
-    if let Some(compiled) = &compiled {
+    match &compiled {
+        None if !workspace.is_empty() => {
+            limitations.push(rules::limitation(LimitationCode::CompiledOutputNotRead));
+        }
+        None => {}
+        Some(compiled) => {
+            inputs.extend(compiled.inputs.iter().cloned());
+            limitations.push(rules::limitation(LimitationCode::CompiledChecksPartial));
+            if !compiled.machine_code {
+                limitations.push(rules::limitation(
+                    LimitationCode::CompiledOutputWithoutMachineCode,
+                ));
+            }
+            if compiled.unoptimized {
+                limitations.push(rules::limitation(
+                    LimitationCode::CompiledOutputNotOptimized,
+                ));
+            }
+            if compiled.wipes == 0 {
+                limitations.push(rules::limitation(
+                    LimitationCode::CompiledOutputWithoutWipes,
+                ));
+            }
+            if compiled.partial {
+                limitations.push(rules::limitation(LimitationCode::CompiledOutputPartlyRead));
+            }
+        }
+    }
+    if let Some(compiled) = &build_list {
         inputs.push(Input::CompileDatabase {
             path: compiled.rel.clone(),
             files: u32::try_from(compiled.files.len()).unwrap_or(u32::MAX),
@@ -390,7 +456,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         inputs,
         limitations,
     });
-    if let Some(compiled) = compiled.filter(|compiled| !compiled.files.is_empty()) {
+    if let Some(compiled) = build_list.filter(|compiled| !compiled.files.is_empty()) {
         for finding in &mut report.findings {
             let native = matches!(
                 finding.rule,

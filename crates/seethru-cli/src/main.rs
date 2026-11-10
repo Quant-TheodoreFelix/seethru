@@ -12,7 +12,7 @@ seethru - see through your app before attackers do
 Usage
   seethru scan [PATH] [--out FILE] [--json] [--lang LANG] [--no-config]
                [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
-               [--compile-commands FILE]
+               [--compile-commands FILE] [--llvm-ir PATH]...
   seethru schema
   seethru --version
 
@@ -35,6 +35,10 @@ Options
   --compile-commands FILE
                Read compile_commands.json from FILE, a file inside the project,
                to learn which C and C++ files are built. Nothing in it is run
+  --llvm-ir PATH
+               Read compiled output of a Rust project from PATH, a .ll file or
+               a folder with .ll files and, next to them, .s files. Can be given
+               more than once. seethru never runs the build itself
 ";
 
 const REPORT_DIR: &str = ".seethru";
@@ -51,6 +55,7 @@ enum Command {
         sarif: Vec<PathBuf>,
         sarif_out: Option<PathBuf>,
         compile_commands: Option<PathBuf>,
+        llvm_ir: Vec<PathBuf>,
     },
     Schema,
     Version,
@@ -81,6 +86,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut sarif = Vec::new();
             let mut sarif_out: Option<PathBuf> = None;
             let mut compile_commands = None;
+            let mut llvm_ir = Vec::new();
             while let Some(arg) = parser.next()? {
                 match arg {
                     Long("json") => json = true,
@@ -90,6 +96,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     Long("compile-commands") => {
                         compile_commands = Some(PathBuf::from(parser.value()?));
                     }
+                    Long("llvm-ir") => llvm_ir.push(PathBuf::from(parser.value()?)),
                     Long("no-config") => read_config = false,
                     Long("lang") => {
                         let code = parser.value()?.string()?;
@@ -128,6 +135,7 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 sarif,
                 sarif_out,
                 compile_commands,
+                llvm_ir,
             })
         }
         "schema" => match parser.next()? {
@@ -188,12 +196,14 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             sarif,
             sarif_out,
             compile_commands,
+            llvm_ir,
         } => {
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
                 sarif,
                 compile_commands,
+                llvm_ir,
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
@@ -364,9 +374,11 @@ fn print_summary(out: &mut impl Write, report: &ScanReport, lang: Lang) -> io::R
         .iter()
         .partition(|finding| finding.accepted.is_none());
     if open.is_empty() {
-        let none = match lang {
-            Lang::En => "No problems found",
-            Lang::Ko => "발견한 문제가 없어요",
+        let none = match (lang, target.limitations.is_empty()) {
+            (Lang::En, true) => "No problems found",
+            (Lang::Ko, true) => "발견한 문제가 없어요",
+            (Lang::En, false) => "No problems found in what was checked",
+            (Lang::Ko, false) => "확인한 범위에서는 발견한 문제가 없어요",
         };
         writeln!(out, "{none}")?;
     }
@@ -432,7 +444,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None }) if path.as_os_str() == "." && sarif.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty()
         ));
     }
 
@@ -620,6 +632,16 @@ mod tests {
             })
         ));
         assert!(parse(args(&["scan", "--build-output"])).is_err());
+    }
+
+    #[test]
+    fn scan_accepts_compiled_output_more_than_once() {
+        assert!(matches!(
+            parse(args(&["scan", "app", "--llvm-ir", "target/a", "--llvm-ir=b.ll"])),
+            Ok(Command::Scan { ref llvm_ir, .. })
+                if llvm_ir.len() == 2 && llvm_ir[1].as_os_str() == "b.ll"
+        ));
+        assert!(parse(args(&["scan", "--llvm-ir"])).is_err());
     }
 
     #[test]

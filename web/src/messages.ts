@@ -178,6 +178,11 @@ const en: Messages = {
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`build output read from ${input.path}`] : [])),
       ...inputs.flatMap((input) => (input.type === "compileDatabase" ? [`${input.files} built files listed in ${input.path}`] : [])),
       ...inputs.flatMap((input) =>
+        input.type === "compiledOutput"
+          ? [`${input.functions} compiled ${input.functions === 1 ? "function" : "functions"} read from ${input.path}` + (input.machineCode ? "" : " (no machine code)")]
+          : [],
+      ),
+      ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [
               `${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}` +
@@ -308,6 +313,11 @@ const ko: Messages = {
       filesExcluded > 0 ? `${configFile ?? "seethru.toml"}로 ${filesExcluded}개 제외` : "",
       ...inputs.flatMap((input) => (input.type === "buildOutput" ? [`${input.path} 빌드 결과물 읽음`] : [])),
       ...inputs.flatMap((input) => (input.type === "compileDatabase" ? [`${input.path}에 빌드되는 파일 ${input.files}개`] : [])),
+      ...inputs.flatMap((input) =>
+        input.type === "compiledOutput"
+          ? [`${input.path}에서 컴파일된 함수 ${input.functions}개 읽음` + (input.machineCode ? "" : " (기계어 없음)")]
+          : [],
+      ),
       ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [`${input.engine} 결과 ${input.results}개` + (input.dropped > 0 ? ` (${input.dropped}개 뺌)` : "")]

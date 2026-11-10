@@ -254,6 +254,14 @@ fn rule_text(rule: RuleId, lang: Lang) -> &'static str {
             "A secret value is written in C or C++ code that is built into a program or firmware.",
             "프로그램이나 펌웨어로 빌드되는 C, C++ 코드에 비밀 값이 적혀 있어요.",
         ),
+        RuleId::SecretDependentDivision => (
+            "Compiled code divides a value that comes from memory the program wipes after use, so the time it takes can reveal a secret.",
+            "컴파일된 코드가 프로그램이 쓰고 나서 지우는 메모리에서 나온 값을 나눠서, 걸리는 시간으로 비밀이 드러날 수 있어요.",
+        ),
+        RuleId::CargoDependencyNotPinned => (
+            "A Cargo dependency is not fixed to one version and the project has no Cargo.lock.",
+            "Cargo 의존성이 한 버전으로 고정돼 있지 않고 프로젝트에 Cargo.lock이 없어요.",
+        ),
         RuleId::External => (
             "A result reported by an outside scanner.",
             "외부 검사 도구가 알린 결과예요.",

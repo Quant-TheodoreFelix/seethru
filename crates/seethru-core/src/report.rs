@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -53,6 +53,7 @@ pub enum Ecosystem {
     Zephyr,
     PlatformIo,
     Arduino,
+    Cargo,
 }
 
 #[derive(
@@ -80,6 +81,12 @@ pub enum Input {
         path: String,
         files: u32,
     },
+    CompiledOutput {
+        path: String,
+        files: u32,
+        functions: u32,
+        machine_code: bool,
+    },
 }
 
 #[derive(
@@ -100,6 +107,7 @@ pub enum InputKind {
     BuildOutput,
     Sarif,
     CompileDatabase,
+    CompiledOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -122,6 +130,13 @@ pub enum LimitationCode {
     ExternalResultsDropped,
     FirmwareProtectionNotChecked,
     NativeCodePartlyRead,
+    ProjectKindNotRecognized,
+    CompiledOutputNotRead,
+    CompiledChecksPartial,
+    CompiledOutputWithoutMachineCode,
+    CompiledOutputNotOptimized,
+    CompiledOutputPartlyRead,
+    CompiledOutputWithoutWipes,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -303,6 +318,7 @@ pub enum Unit {
     File,
     Function,
     Image,
+    Package,
 }
 
 #[derive(
@@ -573,6 +589,8 @@ pub enum RuleId {
     FirmwareTlsVerificationOff,
     FirmwareOtaUnguarded,
     SecretInNativeCode,
+    SecretDependentDivision,
+    CargoDependencyNotPinned,
 }
 
 impl RuleId {
@@ -595,6 +613,8 @@ impl RuleId {
             Self::FirmwareTlsVerificationOff => "firmware-tls-verification-off",
             Self::FirmwareOtaUnguarded => "firmware-ota-unguarded",
             Self::SecretInNativeCode => "secret-in-native-code",
+            Self::SecretDependentDivision => "secret-dependent-division",
+            Self::CargoDependencyNotPinned => "cargo-dependency-not-pinned",
         }
     }
 
@@ -612,6 +632,8 @@ impl RuleId {
             Self::FirmwareOtaOverHttp => &[319, 494],
             Self::FirmwareTlsVerificationOff => &[295],
             Self::FirmwareOtaUnguarded => &[306, 494],
+            Self::SecretDependentDivision => &[208],
+            Self::CargoDependencyNotPinned => &[829],
             Self::SupabaseServiceRoleUnguarded => &[306, 862],
             Self::SupabaseTableSchemaMissing | Self::External => &[],
         }
@@ -667,6 +689,14 @@ impl Origin {
         Self {
             engine: "seethru".to_owned(),
             inputs: vec![InputKind::Source],
+            rule: None,
+        }
+    }
+
+    pub fn seethru_with_compiled_output() -> Self {
+        Self {
+            engine: "seethru".to_owned(),
+            inputs: vec![InputKind::Source, InputKind::CompiledOutput],
             rule: None,
         }
     }

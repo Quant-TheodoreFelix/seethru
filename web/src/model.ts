@@ -13,7 +13,7 @@ export type Runtime = (typeof RUNTIMES)[number];
 const ARTIFACTS = ["source", "buildOutput", "migration", "config", "binary", "other"] as const;
 export type Artifact = (typeof ARTIFACTS)[number];
 
-const UNITS = ["file", "function", "image"] as const;
+const UNITS = ["file", "function", "image", "package"] as const;
 export type Unit = (typeof UNITS)[number];
 
 const BASES = ["path", "directive", "imports", "buildOutput", "engine", "dynamic"] as const;
@@ -71,10 +71,10 @@ export const EDGE_KINDS = [
 ] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
-const ECOSYSTEMS = ["next", "vite", "supabase", "espIdf", "zephyr", "platformIo", "arduino"] as const;
+const ECOSYSTEMS = ["next", "vite", "supabase", "espIdf", "zephyr", "platformIo", "arduino", "cargo"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase"] as const;
+const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase", "compiledOutput"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
 
 const BUILD_TOOLS = ["vite", "next"] as const;
@@ -84,9 +84,10 @@ export type TargetInput =
   | { type: "source" }
   | { type: "buildOutput"; path: string; tool: BuildTool }
   | { type: "sarif"; path: string; engine: string; results: number; dropped: number }
-  | { type: "compileDatabase"; path: string; files: number };
+  | { type: "compileDatabase"; path: string; files: number }
+  | { type: "compiledOutput"; path: string; files: number; functions: number; machineCode: boolean };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -171,7 +172,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -496,6 +497,16 @@ export function parseScanReport(input: unknown): ScanReport {
         if (kind === "compileDatabase") {
           const o = object(value, path, ["type", "path", "files"]);
           return { type: "compileDatabase", path: text(o.path, `${path}.path`), files: count(o.files, `${path}.files`) };
+        }
+        if (kind === "compiledOutput") {
+          const o = object(value, path, ["type", "path", "files", "functions", "machineCode"]);
+          return {
+            type: "compiledOutput",
+            path: text(o.path, `${path}.path`),
+            files: count(o.files, `${path}.files`),
+            functions: count(o.functions, `${path}.functions`),
+            machineCode: flag(o.machineCode, `${path}.machineCode`),
+          };
         }
         if (kind === "sarif") {
           const o = object(value, path, ["type", "path", "engine", "results", "dropped"]);

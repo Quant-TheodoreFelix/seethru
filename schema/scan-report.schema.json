@@ -238,7 +238,8 @@
         "espIdf",
         "zephyr",
         "platformIo",
-        "arduino"
+        "arduino",
+        "cargo"
       ],
       "type": "string"
     },
@@ -511,6 +512,39 @@
             "files"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "files": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "functions": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "machineCode": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "const": "compiledOutput",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "files",
+            "functions",
+            "machineCode"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -519,7 +553,8 @@
         "source",
         "buildOutput",
         "sarif",
-        "compileDatabase"
+        "compileDatabase",
+        "compiledOutput"
       ],
       "type": "string"
     },
@@ -548,7 +583,14 @@
         "externalNotVerified",
         "externalResultsDropped",
         "firmwareProtectionNotChecked",
-        "nativeCodePartlyRead"
+        "nativeCodePartlyRead",
+        "projectKindNotRecognized",
+        "compiledOutputNotRead",
+        "compiledChecksPartial",
+        "compiledOutputWithoutMachineCode",
+        "compiledOutputNotOptimized",
+        "compiledOutputPartlyRead",
+        "compiledOutputWithoutWipes"
       ],
       "type": "string"
     },
@@ -867,7 +909,9 @@
         "firmware-ota-over-http",
         "firmware-tls-verification-off",
         "firmware-ota-unguarded",
-        "secret-in-native-code"
+        "secret-in-native-code",
+        "secret-dependent-division",
+        "cargo-dependency-not-pinned"
       ],
       "type": "string"
     },
@@ -1050,7 +1094,8 @@
       "enum": [
         "file",
         "function",
-        "image"
+        "image",
+        "package"
       ],
       "type": "string"
     },

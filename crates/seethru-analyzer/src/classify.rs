@@ -159,6 +159,7 @@ pub(crate) struct ProjectHints {
     pio_roots: BTreeSet<String>,
     arduino_roots: BTreeSet<String>,
     native_build_at_root: bool,
+    cargo_roots: BTreeSet<String>,
 }
 
 pub(crate) fn is_wanted(rel_path: &str) -> bool {
@@ -184,6 +185,8 @@ impl ProjectHints {
                 }
             } else if name.ends_with(".ino") {
                 hints.arduino_roots.insert(dir.to_owned());
+            } else if name == "Cargo.toml" {
+                hints.cargo_roots.insert(dir.to_owned());
             }
             if dir.is_empty() && (NATIVE_BUILD_FILES.contains(&name) || is_kconfig(name)) {
                 hints.native_build_at_root = true;
@@ -196,6 +199,9 @@ impl ProjectHints {
         let content = content_of(file_name(rel_path))?;
         let mut served_as_is = false;
         if self.native_build_at_root && is_native_build_dir(rel_path) {
+            return None;
+        }
+        if self.is_cargo_output(rel_path) {
             return None;
         }
         let role = match content {
@@ -241,6 +247,12 @@ impl ProjectHints {
             }
         }
         found
+    }
+
+    fn is_cargo_output(&self, rel_path: &str) -> bool {
+        self.cargo_roots.iter().any(|root| {
+            has_root(rel_path, root) && strip_root(rel_path, root).starts_with("target/")
+        })
     }
 
     pub(crate) fn firmware_root_for(&self, rel_path: &str) -> Option<&str> {

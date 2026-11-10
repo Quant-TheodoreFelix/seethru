@@ -961,6 +961,69 @@ pub(crate) fn ota_unguarded(entry: &str, more: usize) -> Text {
     }
 }
 
+pub(crate) fn secret_dependent_division(file: &str, line: u32, confirmed: bool) -> Text {
+    let file = display_name(file);
+    let (seen_en, seen_ko) = if confirmed {
+        (
+            "The machine code that was built has a division instruction for this line.",
+            "빌드된 기계어에 이 줄의 나눗셈 명령이 들어 있어요.",
+        )
+    } else {
+        (
+            "No machine code could be matched to this line, so check whether the compiler kept the division.",
+            "이 줄에 맞는 기계어를 찾지 못했으니, 컴파일러가 나눗셈을 그대로 뒀는지 확인하세요.",
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("A secret value is divided at line {line} of `{file}`"),
+            ko: format!("`{file}` {line}번째 줄에서 비밀 값으로 나눗셈을 해요"),
+        },
+        explanation: LocalizedText {
+            en: format!(
+                "How long a processor takes to divide depends on the numbers it is given. The compiled code divides a value that comes from memory the program wipes after use, and that is how seethru recognizes a secret. Someone who can measure how long this code takes may learn part of the secret. {seen_en} If the value is not secret, accept this finding in `seethru.toml` with a reason."
+            ),
+            ko: format!(
+                "프로세서가 나눗셈에 쓰는 시간은 숫자에 따라 달라져요. 컴파일된 코드가 프로그램이 쓰고 나서 지우는 메모리에서 나온 값을 나누고 있고, seethru는 그렇게 지우는 값을 비밀로 봐요. 이 코드가 걸리는 시간을 잴 수 있는 사람은 비밀의 일부를 알아낼 수 있어요. {seen_ko} 비밀이 아닌 값이라면 `seethru.toml`에 사유를 적고 이 탐지를 받아들이세요."
+            ),
+        },
+    }
+}
+
+pub(crate) fn cargo_dependency_not_pinned(name: &str, manifest: &str, git: bool) -> Text {
+    let name = display_name(name);
+    let manifest = display_name(manifest);
+    let (how_en, how_ko) = if git {
+        (
+            format!(
+                "`{name}` is downloaded from a git repository without a fixed commit, and this project has no `Cargo.lock`. A build can pull code that was pushed after you last looked at it. Fix it to one commit with `rev`, or commit `Cargo.lock`."
+            ),
+            format!(
+                "`{name}`을 git 저장소에서 받는데 커밋이 고정돼 있지 않고, 이 프로젝트에는 `Cargo.lock`도 없어요. 빌드할 때마다 마지막으로 확인한 뒤에 올라온 코드를 받을 수 있어요. `rev`로 커밋 하나에 고정하거나 `Cargo.lock`을 커밋하세요."
+            ),
+        )
+    } else {
+        (
+            format!(
+                "`{name}` accepts any version, and this project has no `Cargo.lock`. A build can pull a version nobody has looked at. Write the version you tested, or commit `Cargo.lock`."
+            ),
+            format!(
+                "`{name}`이 아무 버전이나 받게 돼 있고, 이 프로젝트에는 `Cargo.lock`도 없어요. 빌드할 때 아무도 확인하지 않은 버전을 받을 수 있어요. 확인한 버전을 적거나 `Cargo.lock`을 커밋하세요."
+            ),
+        )
+    };
+    Text {
+        title: LocalizedText {
+            en: format!("`{name}` in `{manifest}` is not fixed to one version"),
+            ko: format!("`{manifest}`의 `{name}`이 한 버전으로 고정돼 있지 않아요"),
+        },
+        explanation: LocalizedText {
+            en: how_en,
+            ko: how_ko,
+        },
+    }
+}
+
 pub(crate) fn limitation(code: LimitationCode) -> Limitation {
     let (en, ko) = match code {
         LimitationCode::BuildOutputNotRead => (
@@ -986,6 +1049,34 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::NativeCodePartlyRead => (
             "C and C++ files were read without building them, so macros, function pointers and generated code were not followed. Missing findings there do not mean the code is safe.",
             "C와 C++ 파일은 빌드하지 않고 읽었기 때문에 매크로, 함수 포인터, 생성된 코드는 따라가지 못했어요. 그 부분에 탐지가 없다고 안전하다는 뜻은 아니에요.",
+        ),
+        LimitationCode::ProjectKindNotRecognized => (
+            "seethru did not recognize what kind of project this is, so it only looked for secret values written in files. No findings here does not mean the project is safe.",
+            "seethru가 이 프로젝트의 종류를 알아보지 못해서 파일에 적힌 비밀 값만 찾았어요. 탐지가 없다고 안전하다는 뜻은 아니에요.",
+        ),
+        LimitationCode::CompiledOutputNotRead => (
+            "This is a Rust project, and only its source and Cargo files were read. Whether a secret value affects timing can only be checked in compiled output. Build with `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release` and pass the output folder with `--llvm-ir`. seethru never runs the build itself.",
+            "Rust 프로젝트인데 소스와 Cargo 파일만 읽었어요. 비밀 값이 실행 시간에 영향을 주는지는 컴파일 결과에서만 확인할 수 있어요. `RUSTFLAGS=\"--emit=llvm-ir,asm -C debuginfo=line-tables-only\" cargo build --release`로 빌드한 뒤 결과 폴더를 `--llvm-ir`로 넘기세요. seethru는 빌드를 직접 실행하지 않아요.",
+        ),
+        LimitationCode::CompiledChecksPartial => (
+            "In compiled output, seethru only checks whether a secret value reaches a division. Branches and table lookups that depend on a secret, and whether memory wipes survive the compiler, are not checked yet. A value counts as secret only when the code wipes the memory it is kept in with a call written in the code, such as `zeroize()`. Memory that a type wipes by itself when it is dropped does not count. Output of a library is from before the final link, so the shipped program can differ.",
+            "컴파일 결과에서는 비밀 값이 나눗셈에 닿는지만 확인해요. 비밀에 따라 갈리는 분기와 표 조회, 메모리 소거가 컴파일 뒤에도 남는지는 아직 확인하지 않아요. 코드에 적힌 호출(예: `zeroize()`)로 쓰고 나서 지우는 메모리에 든 값만 비밀로 봐요. 타입이 drop될 때 알아서 지우는 메모리는 세지 않아요. 라이브러리의 결과는 최종 링크 전 단계라 실제 배포되는 프로그램과 다를 수 있어요.",
+        ),
+        LimitationCode::CompiledOutputWithoutMachineCode => (
+            "Some compiled files had no machine code listing (`.s`) next to them, so findings there could not be confirmed and need review.",
+            "컴파일 결과 중 일부는 옆에 기계어 목록(`.s`)이 없어서, 그 부분의 탐지는 확정하지 못했고 직접 확인이 필요해요.",
+        ),
+        LimitationCode::CompiledOutputNotOptimized => (
+            "The compiled output looks like a debug build. Check a release build, because that is what ships and the compiler changes the code a lot on the way.",
+            "컴파일 결과가 디버그 빌드로 보여요. 실제로 배포하는 것은 릴리스 빌드이고 컴파일러가 그 과정에서 코드를 많이 바꾸니, 릴리스 빌드로 확인하세요.",
+        ),
+        LimitationCode::CompiledOutputWithoutWipes => (
+            "The compiled output has no memory wipe that is written as a call in the code, so nothing was treated as secret and nothing could be checked. This is normal when secrets are only wiped by their type on drop.",
+            "컴파일 결과에 코드에 적힌 호출로 메모리를 지우는 곳이 없어서, 비밀로 본 값이 없고 확인한 것도 없어요. 비밀을 타입이 drop될 때만 지우는 코드에서는 이렇게 나와요.",
+        ),
+        LimitationCode::CompiledOutputPartlyRead => (
+            "Part of the compiled output was left out because it was too large, could not be read, or points at files outside this project.",
+            "컴파일 결과 중 일부는 너무 크거나 읽을 수 없거나 이 프로젝트 밖의 파일을 가리켜서 뺐어요.",
         ),
         LimitationCode::ExternalNotVerified => (
             "Results from outside scanners are shown as that scanner reported them. seethru did not check them itself.",
@@ -1048,6 +1139,10 @@ mod tests {
             super::ota_unguarded("/update", 2),
             super::external("joern", "call-to-gets", &[], "main.c", 1),
             super::external("gcc", "x", &[99_999], "main.c", 1),
+            super::secret_dependent_division("vault/src/lib.rs", 12, true),
+            super::secret_dependent_division("vault/src/lib.rs", 12, false),
+            super::cargo_dependency_not_pinned("helper", "Cargo.toml", true),
+            super::cargo_dependency_not_pinned("helper", "app/Cargo.toml", false),
         ];
         for option in super::RISKY_OPTIONS {
             texts.push(super::risky_option(option, "sdkconfig.defaults"));

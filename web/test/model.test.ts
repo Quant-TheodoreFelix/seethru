@@ -4,7 +4,7 @@ import { ReportError, edgeKindsIn, parseScanReport, worstSeverity } from "../src
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -193,8 +193,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 7 }), /version 8 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 9 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 8 }), /version 9 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 10 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
@@ -263,5 +263,23 @@ test("accepts results from an outside scanner", () => {
   assert.deepEqual(parsed.target.inputs[1], { type: "sarif", path: "out.sarif", engine: "semgrep", results: 1, dropped: 2 });
   assert.equal(parsed.findings[0]?.origin.rule, "c.exec");
   report.target.inputs = [{ type: "sarif", path: "out.sarif", engine: "semgrep", results: 1, dropped: 2, url: "x" }];
+  assert.throws(() => parseScanReport(report), ReportError);
+});
+
+test("reads compiled output inputs and package units", () => {
+  const report = validReport();
+  const [node] = report.nodes;
+  const [finding] = report.findings;
+  assert.ok(node && finding);
+  const input = { type: "compiledOutput", path: "target/ir", files: 2, functions: 40, machineCode: true };
+  report.target.ecosystems = ["cargo"];
+  report.target.inputs = [{ type: "source" }, input];
+  report.target.limitations = [{ code: "compiledChecksPartial", text: { en: "l", ko: "한계" } }];
+  report.nodes = [...report.nodes, { ...node, id: "package:cargo:vault", label: "vault", kind: { ...node.kind, runtime: "native", artifact: "source", unit: "package" } }];
+  report.findings = [{ ...finding, rule: "secret-dependent-division", origin: { engine: "seethru", inputs: ["source", "compiledOutput"] } }];
+  const parsed = parseScanReport(report);
+  assert.deepEqual(parsed.target.inputs[1], input);
+  assert.deepEqual(parsed.findings[0]?.origin.inputs, ["source", "compiledOutput"]);
+  report.target.inputs = [{ type: "compiledOutput", path: "target/ir", files: 2, functions: 40 }];
   assert.throws(() => parseScanReport(report), ReportError);
 });
