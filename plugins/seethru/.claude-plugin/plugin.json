@@ -1,0 +1,13 @@
+{
+  "name": "seethru",
+  "version": "0.1.0",
+  "description": "Scan a project with seethru, read the report, fix the findings in order and rescan to prove the fix.",
+  "author": {
+    "name": "Quant-TheodoreFelix",
+    "url": "https://github.com/Quant-TheodoreFelix"
+  },
+  "homepage": "https://github.com/Quant-TheodoreFelix/seethru",
+  "repository": "https://github.com/Quant-TheodoreFelix/seethru",
+  "license": "Apache-2.0",
+  "keywords": ["security", "static-analysis", "supabase", "firmware", "sarif"]
+}

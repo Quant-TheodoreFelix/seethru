@@ -1,0 +1,23 @@
+{
+  "name": "seethru",
+  "owner": {
+    "name": "Quant-TheodoreFelix",
+    "url": "https://github.com/Quant-TheodoreFelix"
+  },
+  "metadata": {
+    "version": "0.1.0",
+    "description": "Skills for running the seethru static security scanner from a coding agent"
+  },
+  "plugins": [
+    {
+      "name": "seethru",
+      "description": "Scan a project with seethru, read the report, fix the findings in order and rescan to prove the fix.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Quant-TheodoreFelix",
+        "url": "https://github.com/Quant-TheodoreFelix"
+      },
+      "source": "./plugins/seethru"
+    }
+  ]
+}
