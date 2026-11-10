@@ -35,6 +35,8 @@ The report is written to `<project path>/.seethru/report.html`, and that directo
 | `--lang ko`          | Show the summary and the report in Korean (default is `en`)                        |
 | `--no-config`        | Ignore `seethru.toml` in the scanned project (see [Configuration](#configuration)) |
 | `--build-output DIR` | Read the Vite or Next build output in DIR, a folder inside the project             |
+| `--sarif FILE`       | Add the results another scanner wrote to FILE in SARIF 2.1.0. Up to 8 files       |
+| `--sarif-out FILE`   | Also write what seethru found to FILE in SARIF 2.1.0                               |
 
 
 | Check                     | What it finds                                                                                                        |
@@ -79,6 +81,8 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `id`   | One finding, by the ID shown in the report's fix panel and in `--json`  |
 | `rule` | Every finding of a rule, by the rule ID in the table below              |
 | `path` | Findings reported in files that match a pattern, written like `exclude` |
+| `engine` | Results from one outside scanner, by the name seethru shows for it, such as `semgrep` |
+| `external-rule` | Results of one rule of an outside scanner, by the rule name shown in the report |
 
 | Rule ID                                | Severity        | Finding                                                                                                                      |
 |----------------------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------|
@@ -93,6 +97,7 @@ reason = "orders was made in the dashboard and has RLS on there"
 | `secret-in-public-env-var`             | Critical        | A secret in an env variable with a public prefix such as `VITE_`                                                             |
 | `secret-in-source-code`                | High            | A secret in a file that does not reach the browser, such as server code or an env file                                       |
 | `supabase-table-schema-missing`        | Info            | The code queries a table that no SQL file in the repo creates                                                                |
+| `external`                             | Info to High    | A result another scanner reported in a SARIF file. seethru did not check it itself                                          |
 
 - A finding ID is the rule ID followed by the graph node, such as `supabase-rls-disabled:table:public.orders`.
 - The ID of a secret finding names the file, the kind of secret and its order among secrets of that kind in the file, such as `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`. It stays the same when other code in the file moves.
@@ -125,6 +130,23 @@ $ seethru scan . --build-output .next
 - Findings on files that the build output confirms are no longer marked as likely. A secret found in a bundle points back to its source line through the source map.
 - If any source file is newer than the build output by more than 2 seconds, the build output is not used and the report says so under "Not checked". Build again and rerun.
 - Even without the option, files under `.next/server` and `.next/standalone` are treated as server code, `.next/static` as browser code and `.next/cache` as build cache.
+
+## Results from other scanners
+
+seethru can show what another scanner found next to its own findings. Run the scanner yourself, save its results as SARIF 2.1.0, and pass the file.
+
+```bash
+$ seethru scan . --sarif semgrep.sarif --sarif clang.sarif
+$ seethru scan . --sarif-out seethru.sarif
+```
+
+- seethru never runs a scanner. It only reads the file you pass, and it never looks for SARIF files inside the project.
+- Each result becomes a finding with the rule `external`, marked "needs review". Its severity is at most High, because seethru did not check the result itself.
+- The scanner's own text is not copied. Messages, code snippets and help text can hold secrets or instructions aimed at an AI tool, so the report keeps only the scanner name, the rule name, CWE numbers, the file and the line. Titles, explanations and fix prompts are written by seethru.
+- A result is kept only when its file exists inside the scanned project. Results on other paths, on excluded files, on remote addresses, or without a usable location are left out, and the report says how many.
+- To accept results, use `engine`, `external-rule` and `path` in `[[accept]]`. `rule = "external"` alone is rejected, because it would hide every scanner at once.
+- `--sarif-out` writes seethru's own findings as SARIF, for example for GitHub code scanning. Accepted findings are marked as suppressed. Results that came from another scanner are not written again.
+- Joern's `joern-scan` prints text and has no SARIF option. Joern exports SARIF from a script that calls `cpg.finding.toSarifJson()`. The `tests/test-sarif.sc` file in the Joern repository shows how.
 
 ## Safety by design
 

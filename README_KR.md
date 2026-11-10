@@ -36,6 +36,8 @@ $ cargo run -p seethru-cli -- scan <프로젝트 경로>
 | `--lang ko`          | 요약과 리포트를 한국어로 보여 줍니다 (기본값 `en`)                                |
 | `--no-config`        | 검사하는 프로젝트의 `seethru.toml`을 무시합니다 ([설정](#설정) 참고)              |
 | `--build-output DIR` | `DIR`에 있는 Vite 또는 Next 빌드 결과물을 읽습니다. 프로젝트 안의 폴더여야 합니다 |
+| `--sarif FILE`       | 다른 검사 도구가 SARIF 2.1.0으로 `FILE`에 쓴 결과를 함께 보여 줍니다. 최대 8개    |
+| `--sarif-out FILE`   | seethru가 찾은 것을 SARIF 2.1.0으로 `FILE`에도 저장합니다                         |
 
 
 | 탐지 항목              | 설명                                                                            |
@@ -80,6 +82,8 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `id`   | 문제 하나. 리포트의 Fix 패널과 `--json` 출력에 나오는 문제 ID로 지정합니다 |
 | `rule` | 규칙 하나의 모든 탐지. 아래 표의 규칙 ID로 지정합니다                      |
 | `path` | 패턴에 맞는 파일에서 보고된 탐지. 패턴은 `exclude`와 같은 방식으로 씁니다  |
+| `engine` | 외부 검사 도구 하나의 결과. 리포트에 나오는 도구 이름으로 지정합니다 (예: `semgrep`) |
+| `external-rule` | 외부 검사 도구의 규칙 하나의 결과. 리포트에 나오는 규칙 이름으로 지정합니다 |
 
 
 | 규칙 ID                                  | 심각도    | 탐지 내용                                                                          |
@@ -95,6 +99,7 @@ reason = "orders는 대시보드에서 만들었고 거기서 RLS를 켜 둠"
 | `secret-in-public-env-var`             | 치명적    | `VITE_` 같은 공개 접두사가 붙은 환경변수에 비밀 값이 있음                                           |
 | `secret-in-source-code`                | 높음     | 서버 코드나 환경변수 파일처럼 브라우저로 가지 않는 파일에 비밀 값이 있음                                      |
 | `supabase-table-schema-missing`        | 정보     | 코드에서 쓰는 테이블을 만드는 SQL이 저장소에 없음                                                  |
+| `external`                             | 정보~높음  | 다른 검사 도구가 SARIF 파일로 알린 결과. seethru가 직접 확인한 것은 아님                              |
 
 - 문제 ID는 규칙 ID 뒤에 그래프 노드를 붙인 형태입니다. 예를 들어 `supabase-rls-disabled:table:public.orders`입니다.
 - 비밀 값 탐지의 문제 ID는 파일, 비밀 값 종류, 그 파일에서 같은 종류 중 몇 번째인지로 이루어집니다. 예를 들어 `secret-in-source-code:secret:src/pay.ts:stripeSecretKey:1`입니다. 파일의 다른 코드가 바뀌어도 ID는 그대로입니다.
@@ -127,6 +132,23 @@ $ seethru scan . --build-output .next
 - 빌드 결과물로 확인한 파일의 탐지에는 "추정" 표시가 붙지 않습니다. 번들에서 찾은 비밀 값은 소스맵을 따라 원래 소스 줄을 가리킵니다.
 - 소스 파일 중 하나라도 빌드 결과물보다 2초를 넘게 새로우면 빌드 결과물을 쓰지 않고, 리포트의 "확인하지 못한 것"에 그 사실을 적습니다. 다시 빌드한 뒤 실행하세요.
 - 옵션이 없어도 `.next/server`와 `.next/standalone`은 서버 코드, `.next/static`은 브라우저 코드, `.next/cache`는 빌드 캐시로 취급합니다.
+
+## 다른 검사 도구의 결과
+
+seethru는 다른 검사 도구가 찾은 것을 자기 탐지 옆에 함께 보여 줄 수 있습니다. 검사 도구는 직접 실행하고, 결과를 SARIF 2.1.0으로 저장한 뒤 그 파일을 넘겨 주세요.
+
+```bash
+$ seethru scan . --sarif semgrep.sarif --sarif clang.sarif
+$ seethru scan . --sarif-out seethru.sarif
+```
+
+- seethru는 검사 도구를 실행하지 않습니다. 넘겨 준 파일만 읽고, 프로젝트 안에서 SARIF 파일을 스스로 찾지 않습니다.
+- 결과 하나하나는 규칙 `external`의 탐지가 되고 "확인 필요"로 표시됩니다. seethru가 직접 확인한 것이 아니라서 심각도는 높음까지만 올라갑니다.
+- 검사 도구가 쓴 문장은 옮기지 않습니다. 메시지, 코드 조각, 도움말에는 비밀 값이나 AI 도구를 노린 지시가 들어 있을 수 있어서, 리포트에는 도구 이름, 규칙 이름, CWE 번호, 파일과 줄만 남깁니다. 제목, 설명, 수정 프롬프트는 seethru가 씁니다.
+- 파일이 검사하는 프로젝트 안에 실제로 있는 결과만 남깁니다. 다른 경로, 제외한 파일, 원격 주소를 가리키거나 위치를 알 수 없는 결과는 빼고, 몇 개를 뺐는지 리포트에 적습니다.
+- 결과를 허용하려면 `[[accept]]`에 `engine`, `external-rule`, `path`를 쓰세요. `rule = "external"`만 적으면 모든 검사 도구의 결과를 한꺼번에 숨기게 되므로 받지 않습니다.
+- `--sarif-out`은 seethru의 탐지를 SARIF로 저장합니다. GitHub code scanning에 올릴 때 쓸 수 있습니다. 허용한 탐지는 숨김으로 표시됩니다. 다른 검사 도구에서 온 결과는 다시 쓰지 않습니다.
+- Joern의 `joern-scan`은 텍스트만 출력하고 SARIF 옵션이 없습니다. Joern은 `cpg.finding.toSarifJson()`을 부르는 스크립트로 SARIF를 내보냅니다. 방법은 Joern 저장소의 `tests/test-sarif.sc`에 있습니다.
 
 ## 안전 설계
 
