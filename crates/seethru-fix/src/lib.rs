@@ -126,12 +126,33 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             )
         }
         (
-            RuleId::SecretInBrowserCode | RuleId::SecretInSourceCode | RuleId::SecretInPublicEnvVar,
+            RuleId::SecretInBrowserCode
+            | RuleId::SecretInSourceCode
+            | RuleId::SecretInPublicEnvVar
+            | RuleId::SecretInNativeCode,
             Some(NodeKind::Credential {
                 detail: CredentialDetail::Secret { secret_kind, .. },
             }),
         ) => secret(finding.rule, *secret_kind, &place, lang),
         (RuleId::External, _) => external(&finding.cwe, &place, lang),
+        (
+            RuleId::FirmwareInsecureOptionOn
+            | RuleId::FirmwareOtaOverHttp
+            | RuleId::FirmwareTlsVerificationOff,
+            Some(NodeKind::Config { .. }),
+        ) => firmware_option(finding.rule, &clean(label), &place, lang),
+        (RuleId::FirmwareOtaUnguarded, Some(NodeKind::EntryPoint { .. })) => {
+            let entry = finding
+                .evidence
+                .first()
+                .map_or_else(|| clean(label), |step| clean(&step.label));
+            let writer = finding
+                .evidence
+                .last()
+                .and_then(|step| step.location.as_ref())
+                .map(|location| format!("`{}:{}`", clean(&location.path), location.line));
+            firmware_ota_unguarded(&entry, writer.as_deref(), &place, lang)
+        }
         _ => format!("{}{place}", clean(finding.title.get(lang))),
     };
     let closing = match lang {
@@ -415,6 +436,74 @@ fn external(cwe: &[u32], place: &str, lang: Lang) -> String {
     }
 }
 
+fn firmware_option(rule: RuleId, key: &str, place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => {
+            let why = match rule {
+                RuleId::FirmwareOtaOverHttp => {
+                    "It lets firmware updates download over plain HTTP, so someone on the network can swap the update."
+                }
+                RuleId::FirmwareTlsVerificationOff => {
+                    "It lets the device skip checking the server's certificate, so a fake server would be accepted."
+                }
+                _ => "It is meant only for testing and weakens the protection of the device.",
+            };
+            format!(
+                "The firmware setting `{key}` is turned on.{place} {why}\n\
+                 1. Turn it off in the settings used for release builds.\n\
+                 2. If it is needed while developing, move it to a separate settings file that release builds do not use.\n\
+                 3. Check the code that depended on it, such as update URLs that start with `http://`, and make it work with the setting off."
+            )
+        }
+        Lang::Ko => {
+            let why = match rule {
+                RuleId::FirmwareOtaOverHttp => {
+                    "펌웨어 업데이트를 암호화되지 않은 HTTP로 받을 수 있게 해서, 네트워크의 누군가가 업데이트를 바꿔치기할 수 있어."
+                }
+                RuleId::FirmwareTlsVerificationOff => {
+                    "기기가 서버 인증서 확인을 건너뛸 수 있게 해서, 가짜 서버도 받아들이게 돼."
+                }
+                _ => "테스트용으로만 쓰는 설정이고 기기의 보호를 약하게 만들어.",
+            };
+            format!(
+                "펌웨어 설정 `{key}`가 켜져 있어.{place} {why}\n\
+                 1. 배포용 빌드에 쓰는 설정에서는 꺼 줘.\n\
+                 2. 개발할 때 필요하다면 배포용 빌드가 쓰지 않는 별도 설정 파일로 옮겨 줘.\n\
+                 3. 이 설정에 기대던 코드(예: `http://`로 시작하는 업데이트 주소)를 확인해서 설정을 꺼도 동작하게 고쳐 줘."
+            )
+        }
+    }
+}
+
+fn firmware_ota_unguarded(entry: &str, writer: Option<&str>, place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => {
+            let writer = writer
+                .map(|at| format!(" The update is written at {at}."))
+                .unwrap_or_default();
+            format!(
+                "`{entry}` in the device's HTTP server writes a firmware update, and nothing checks who is sending it first.{place}{writer}\n\
+                 1. At the start of the handler, check a secret that only the owner knows, such as a password or token stored on the device, and answer 401 when it is missing or wrong. Compare it in constant time.\n\
+                 2. Do the check before any byte of the update is written.\n\
+                 3. Accept only update images that are signed with your key, using the signed update support of the platform.\n\
+                 4. Do not put the secret in the source code."
+            )
+        }
+        Lang::Ko => {
+            let writer = writer
+                .map(|at| format!(" 업데이트를 쓰는 곳은 {at}야."))
+                .unwrap_or_default();
+            format!(
+                "기기의 HTTP 서버에 있는 `{entry}`가 펌웨어 업데이트를 쓰는데, 그 전에 누가 보내는지 확인하지 않아.{place}{writer}\n\
+                 1. 처리 함수 맨 앞에서 주인만 아는 비밀 값(기기에 저장한 비밀번호나 토큰)을 확인하고, 없거나 틀리면 401로 응답해 줘. 비교는 상수 시간으로 해 줘.\n\
+                 2. 이 확인은 업데이트를 한 바이트라도 쓰기 전에 해 줘.\n\
+                 3. 플랫폼의 서명된 업데이트 기능을 써서 내 키로 서명한 이미지만 받게 해 줘.\n\
+                 4. 그 비밀 값은 소스 코드에 적지 말아 줘."
+            )
+        }
+    }
+}
+
 fn service_role_in_browser(var: &str, place: &str, readers: &str, lang: Lang) -> String {
     match lang {
         Lang::En => format!(
@@ -444,6 +533,11 @@ fn secret(rule: RuleId, kind: SecretKind, place: &str, lang: Lang) -> String {
                      1. Move the code that uses this value to the server, such as an API route or an Edge Function.\n\
                      2. Remove the public prefix from the env variable name and read it only on the server."
                 ),
+                RuleId::SecretInNativeCode => format!(
+                    "C or C++ code that is built into a program or firmware contains {what}.{place}\n\
+                     1. Remove the value from the code so it is no longer built into the binary.\n\
+                     2. Read it at run time from storage that is not in the repository, such as a provisioning step or encrypted device storage."
+                ),
                 RuleId::SecretInBrowserCode => format!(
                     "Code that is sent to the browser contains {what}.{place}\n\
                      1. Remove the value from the code and move the work that needs it to the server, such as an API route or an Edge Function.\n\
@@ -467,6 +561,11 @@ fn secret(rule: RuleId, kind: SecretKind, place: &str, lang: Lang) -> String {
                     "공개 접두사가 붙은 환경변수에 {what} 값이 들어 있어서 빌드할 때 브라우저 코드에 포함돼.{place}\n\
                      1. 이 값을 쓰는 코드를 서버 쪽(API 라우트나 Edge Function)으로 옮겨 줘.\n\
                      2. 환경변수 이름에서 공개 접두사를 빼고 서버에서만 읽게 해 줘."
+                ),
+                RuleId::SecretInNativeCode => format!(
+                    "프로그램이나 펌웨어로 빌드되는 C, C++ 코드에 {what} 값이 직접 들어 있어.{place}\n\
+                     1. 이 값을 코드에서 지워서 바이너리에 들어가지 않게 해 줘.\n\
+                     2. 값은 저장소에 없는 곳(프로비저닝 단계나 기기의 암호화된 저장 공간)에서 실행할 때 읽게 해 줘."
                 ),
                 RuleId::SecretInBrowserCode => format!(
                     "브라우저로 전달되는 코드에 {what} 값이 직접 들어 있어.{place}\n\
