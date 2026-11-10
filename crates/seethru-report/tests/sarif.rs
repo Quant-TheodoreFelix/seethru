@@ -108,3 +108,40 @@ fn sarif_output_lists_built_in_findings_with_rules_locations_and_flows() {
         "{critical:?}"
     );
 }
+
+#[test]
+fn findings_without_a_file_are_left_out_and_counted() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/supabase-next");
+    let scanned = seethru_analyzer::scan(&root);
+    assert!(scanned.is_ok(), "{scanned:?}");
+    let Ok(mut report) = scanned else { return };
+    assert_eq!(seethru_report::sarif_left_out(&report), 0);
+    let before = report.findings.len();
+    let mut running = report.findings[0].clone();
+    running.id = "security-header-missing:header:content-security-policy".to_owned();
+    running.rule = RuleId::SecurityHeaderMissing;
+    running.location = None;
+    running.node = seethru_core::NodeId::new("entry:deployed-app");
+    report.findings.push(running);
+    assert_eq!(seethru_report::sarif_left_out(&report), 1);
+
+    let rendered = seethru_report::render_sarif(&report, Lang::En);
+    assert!(rendered.is_ok(), "{rendered:?}");
+    let Ok(text) = rendered else { return };
+    let log: Value = serde_json::from_str(&text).unwrap_or_default();
+    let empty = Vec::new();
+    let run = &log["runs"][0];
+    let results = run["results"].as_array().unwrap_or(&empty);
+    assert_eq!(results.len(), before);
+    assert!(
+        results
+            .iter()
+            .all(|result| result["locations"].as_array().is_some_and(|l| l.len() == 1))
+    );
+    let rules = run["tool"]["driver"]["rules"].as_array().unwrap_or(&empty);
+    assert!(
+        rules
+            .iter()
+            .all(|rule| rule["id"] != "security-header-missing")
+    );
+}

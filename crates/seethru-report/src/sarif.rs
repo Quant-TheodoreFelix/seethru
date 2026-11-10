@@ -8,11 +8,29 @@ use serde_json::{Value, json};
 const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 const MAX_FLOW_STEPS: usize = 100;
 
+fn place<'a>(report: &'a ScanReport, finding: &'a Finding) -> Option<&'a Location> {
+    finding.location.as_ref().or_else(|| {
+        report
+            .nodes
+            .iter()
+            .find(|node| node.id == finding.node)
+            .and_then(|node| node.location.as_ref())
+    })
+}
+
+pub fn sarif_left_out(report: &ScanReport) -> usize {
+    report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule != RuleId::External && place(report, finding).is_none())
+        .count()
+}
+
 pub fn render_sarif(report: &ScanReport, lang: Lang) -> Result<String, serde_json::Error> {
     let findings: Vec<&Finding> = report
         .findings
         .iter()
-        .filter(|finding| finding.rule != RuleId::External)
+        .filter(|finding| finding.rule != RuleId::External && place(report, finding).is_some())
         .collect();
     let mut worst: BTreeMap<RuleId, Severity> = BTreeMap::new();
     for finding in &findings {
@@ -91,14 +109,7 @@ fn result_entry(report: &ScanReport, finding: &Finding, index: Option<usize>, la
     if let Some(index) = index {
         map.insert("ruleIndex".to_owned(), Value::from(index));
     }
-    let place = finding.location.as_ref().or_else(|| {
-        report
-            .nodes
-            .iter()
-            .find(|node| node.id == finding.node)
-            .and_then(|node| node.location.as_ref())
-    });
-    if let Some(place) = place {
+    if let Some(place) = place(report, finding) {
         map.insert("locations".to_owned(), json!([location(place, None)]));
     }
     let steps: Vec<Value> = finding

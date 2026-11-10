@@ -8,7 +8,7 @@ use std::fmt;
 
 use seethru_core::{Lang, ScanReport};
 
-pub use sarif::render_sarif;
+pub use sarif::{render_sarif, sarif_left_out};
 
 pub const DATA_ELEMENT_ID: &str = "seethru-report";
 
