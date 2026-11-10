@@ -74,8 +74,11 @@ export type EdgeKind = (typeof EDGE_KINDS)[number];
 const ECOSYSTEMS = ["next", "vite", "supabase", "espIdf", "zephyr", "platformIo", "arduino", "cargo"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
-const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase", "compiledOutput", "binary"] as const;
+const INPUT_KINDS = ["source", "buildOutput", "sarif", "compileDatabase", "compiledOutput", "binary", "probe"] as const;
 export type InputKind = (typeof INPUT_KINDS)[number];
+
+const PROBE_ENVIRONMENTS = ["staging", "production"] as const;
+export type ProbeEnvironment = (typeof PROBE_ENVIRONMENTS)[number];
 
 const BINARY_FORMATS = ["elf", "machO"] as const;
 export type BinaryFormat = (typeof BINARY_FORMATS)[number];
@@ -94,9 +97,10 @@ export type TargetInput =
   | { type: "sarif"; path: string; engine: string; results: number; dropped: number }
   | { type: "compileDatabase"; path: string; files: number }
   | { type: "compiledOutput"; path: string; files: number; functions: number; machineCode: boolean }
-  | { type: "binary"; path: string; format: BinaryFormat; tools: ToolUse[]; lines: number };
+  | { type: "binary"; path: string; format: BinaryFormat; tools: ToolUse[]; lines: number }
+  | { type: "probe"; environment: ProbeEnvironment; tools: ToolUse[]; requests: number };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound", "binaryToolNotPermitted", "binaryToolFailed", "binaryNotFound", "binaryWithoutLineInfo", "binaryWipesNotConfirmed", "binaryChecksPartial"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound", "binaryToolNotPermitted", "binaryToolFailed", "binaryNotFound", "binaryWithoutLineInfo", "binaryWipesNotConfirmed", "binaryChecksPartial", "probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeRedirectedOutside", "probePageNotRead", "probeChecksPartial"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -537,6 +541,19 @@ export function parseScanReport(input: unknown): ScanReport {
               return { name: text(t.name, `${toolPath}.name`), version: text(t.version, `${toolPath}.version`) };
             }),
             lines: count(o.lines, `${path}.lines`),
+          };
+        }
+        if (kind === "probe") {
+          const o = object(value, path, ["type", "environment", "tools", "requests"]);
+          return {
+            type: "probe",
+            environment: oneOf(o.environment, `${path}.environment`, PROBE_ENVIRONMENTS),
+            tools: list(o.tools, `${path}.tools`, MAX_LIST).map((entry, j): ToolUse => {
+              const toolPath = `${path}.tools[${j}]`;
+              const t = object(entry, toolPath, ["name", "version"]);
+              return { name: text(t.name, `${toolPath}.name`), version: text(t.version, `${toolPath}.version`) };
+            }),
+            requests: count(o.requests, `${path}.requests`),
           };
         }
         if (kind === "sarif") {

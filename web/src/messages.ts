@@ -187,6 +187,13 @@ const en: Messages = {
           : [],
       ),
       ...inputs.flatMap((input) =>
+        input.type === "probe"
+          ? [
+              `running app (${input.environment}) checked with ${input.requests} ${input.requests === 1 ? "request" : "requests"} sent by ${input.tools.map((tool) => `${tool.name} ${tool.version}`).join(", ")}`,
+            ]
+          : [],
+      ),
+      ...inputs.flatMap((input) =>
         input.type === "sarif"
           ? [
               `${input.results} ${input.results === 1 ? "result" : "results"} from ${input.engine}` +
@@ -324,6 +331,13 @@ const ko: Messages = {
       ...inputs.flatMap((input) =>
         input.type === "binary"
           ? [`빌드된 프로그램 ${input.path}을(를) ${input.tools.map((tool) => `${tool.name} ${tool.version}`).join(", ")}(으)로 읽음`]
+          : [],
+      ),
+      ...inputs.flatMap((input) =>
+        input.type === "probe"
+          ? [
+              `실행 중인 앱(${input.environment === "production" ? "프로덕션" : "스테이징"})을 ${input.tools.map((tool) => `${tool.name} ${tool.version}`).join(", ")}(으)로 요청 ${input.requests}개를 보내 점검함`,
+            ]
           : [],
       ),
       ...inputs.flatMap((input) =>

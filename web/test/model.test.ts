@@ -293,6 +293,35 @@ test("reads compiled output inputs and package units", () => {
   assert.throws(() => parseScanReport(report), ReportError);
 });
 
+test("reads a check of the running app with its proof", () => {
+  const report = validReport();
+  const [finding] = report.findings;
+  assert.ok(finding);
+  const input = { type: "probe", environment: "staging", tools: [{ name: "curl", version: "8.7.1" }], requests: 3 };
+  report.target.inputs = [{ type: "source" }, input];
+  report.target.limitations = [{ code: "probeChecksPartial", text: { en: "l", ko: "한계" } }];
+  report.findings = [
+    {
+      ...finding,
+      rule: "security-header-missing",
+      proof: "proof/security-header-missing-header-content-security-policy.json",
+      origin: { engine: "seethru", inputs: ["probe"], tools: ["curl"] },
+    },
+  ];
+  const parsed = parseScanReport(report);
+  assert.deepEqual(parsed.target.inputs[1], input);
+  assert.equal(parsed.findings[0]?.proof, "proof/security-header-missing-header-content-security-policy.json");
+  assert.deepEqual(parsed.findings[0]?.origin.inputs, ["probe"]);
+  for (const code of ["probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeRedirectedOutside", "probePageNotRead"]) {
+    report.target.limitations = [{ code, text: { en: "l", ko: "한계" } }];
+    assert.equal(parseScanReport(report).target.limitations[0]?.code, code);
+  }
+  report.target.inputs = [{ type: "source" }, { ...input, environment: "local" }];
+  assert.throws(() => parseScanReport(report), ReportError);
+  report.target.inputs = [{ type: "source" }, { ...input, url: "https://app.example" }];
+  assert.throws(() => parseScanReport(report), ReportError);
+});
+
 test("reads a built program that an outside tool was run on", () => {
   const report = validReport();
   const [finding] = report.findings;
