@@ -967,7 +967,14 @@ mod tests {
             division_lines: vec![line(4, true), line(9, false)],
             assembly_blocks: 5,
             assembly_blocks_without_line: 1,
-            assembly_lines: vec![block(3, false), block(8, true)],
+            assembly_lines: vec![
+                block(3, false),
+                block(8, true),
+                seethru_core::AssemblyLine {
+                    divides: true,
+                    ..block(9, false)
+                },
+            ],
         });
         let mut out = Vec::new();
         assert!(print_summary(&mut out, &report, Lang::En).is_ok());
@@ -977,8 +984,9 @@ mod tests {
             "Division instructions: 7. Lines of this project that have one: 2, of which findings: 1",
             "Lines seethru did not tie to a secret:\n    src/lib.rs:9\n",
             "Instructions not matched to a line of this project: 2",
-            "Hand-written assembly blocks: 5, on lines of this project: 2. Lines with a division or a conditional jump: 1",
+            "Hand-written assembly blocks: 5, on lines of this project: 3. Lines with a division or a conditional jump: 2",
             "    src/arch.rs:8  conditional jump, takes a secret\n",
+            "    src/arch.rs:9  division\n",
             "Blocks not matched to a line of this project: 1",
         ] {
             assert!(en.contains(part), "{part}\n{en}");

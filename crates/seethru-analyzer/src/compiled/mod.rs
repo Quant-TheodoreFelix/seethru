@@ -58,7 +58,21 @@ pub(crate) struct Compiled {
 }
 
 type Place = (String, u32);
-type Scope = (usize, Option<usize>, String, u32);
+type Scope = (usize, Option<usize>, u32, u32);
+
+#[derive(Default)]
+struct Names(HashMap<String, u32>);
+
+impl Names {
+    fn id(&mut self, name: &str) -> u32 {
+        if let Some(id) = self.0.get(name) {
+            return *id;
+        }
+        let id = u32::try_from(self.0.len()).unwrap_or(u32::MAX);
+        self.0.insert(name.to_owned(), id);
+        id
+    }
+}
 
 struct Unit {
     module: ir::Module,
@@ -166,6 +180,7 @@ pub(crate) fn read(
         inside.dedup();
         inside
     };
+    let mut names = Names::default();
     let mut divided: HashMap<Scope, BTreeSet<Place>> = HashMap::new();
     let mut merged: BTreeMap<Place, Division> = BTreeMap::new();
     for site in &flow.sites {
@@ -179,7 +194,7 @@ pub(crate) fn read(
         let mut inside = inside_of(&frames);
         if unit.listing.is_some() {
             divided
-                .entry((site.module, scope, inner.path.clone(), inner.line))
+                .entry((site.module, scope, names.id(&inner.path), inner.line))
                 .or_default()
                 .extend(inside.first().cloned());
         }
@@ -227,10 +242,12 @@ pub(crate) fn read(
             continue;
         };
         let scope = unit.matched.then_some(site.function);
+        let mut inside = inside_of(&frames);
+        inside.truncate(MAX_STEPS);
         written
-            .entry((site.module, scope, inner.path.clone(), inner.line))
+            .entry((site.module, scope, names.id(&inner.path), inner.line))
             .or_default()
-            .insert((inside_of(&frames), site.secret));
+            .insert((inside, site.secret));
     }
     let mut halted: BTreeMap<Place, Stop> = BTreeMap::new();
     for site in &flow.stops {
@@ -278,7 +295,7 @@ pub(crate) fn read(
                 true => Some(*symbols.get(spot.function.as_deref()?)?),
                 false => None,
             };
-            Some((at, function, path.to_string(), *line))
+            Some((at, function, *names.0.get(path.as_ref())?, *line))
         };
         for (spot, count) in &listing.divisions {
             machine.divisions = machine.divisions.saturating_add(*count);
