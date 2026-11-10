@@ -312,7 +312,7 @@ test("reads a check of the running app with its proof", () => {
   assert.deepEqual(parsed.target.inputs[1], input);
   assert.equal(parsed.findings[0]?.proof, "proof/security-header-missing-header-content-security-policy.json");
   assert.deepEqual(parsed.findings[0]?.origin.inputs, ["probe"]);
-  for (const code of ["probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeRedirectedOutside", "probePageNotRead"]) {
+  for (const code of ["probeToolNotPermitted", "probeToolFailed", "ownershipNotVerified", "probeTargetNotResponding", "probeStoppedBySeethru", "probeRedirectedOutside", "probePageNotRead"]) {
     report.target.limitations = [{ code, text: { en: "l", ko: "한계" } }];
     assert.equal(parseScanReport(report).target.limitations[0]?.code, code);
   }

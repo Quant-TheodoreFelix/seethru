@@ -1236,6 +1236,10 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "The running app stopped answering, answered in a way seethru could not read, or answered from an address seethru does not send to, so the check ended early. What was found before that is still shown. The record of every request is in `.seethru/audit.jsonl`.",
             "실행 중인 앱이 응답을 멈췄거나, seethru가 읽을 수 없게 응답했거나, seethru가 요청을 보내지 않는 주소에서 응답해서 점검을 일찍 끝냈어요. 그 전에 찾은 것은 그대로 보여 줘요. 보낸 요청은 모두 `.seethru/audit.jsonl`에 기록돼 있어요.",
         ),
+        LimitationCode::ProbeStoppedBySeethru => (
+            "seethru ended the check of the running app early for a reason on its own side. It could not write the request record to `.seethru/audit.jsonl`, or it reached its limit of requests for one run. seethru does not send a request that it cannot record first. What was found before that is still shown.",
+            "seethru 쪽 사정으로 실행 중인 앱의 점검을 일찍 끝냈어요. 요청 기록을 `.seethru/audit.jsonl`에 쓰지 못했거나, 한 번의 검사에서 보낼 수 있는 요청 수에 닿았어요. seethru는 먼저 기록하지 못한 요청은 보내지 않아요. 그 전에 찾은 것은 그대로 보여 줘요.",
+        ),
         LimitationCode::ProbeRedirectedOutside => (
             "The running app sent seethru to another site. seethru only sends requests to the address you proved is yours, so it did not follow and the check ended there.",
             "실행 중인 앱이 seethru를 다른 사이트로 보내려고 했어요. seethru는 소유를 확인한 주소에만 요청을 보내기 때문에 따라가지 않았고, 점검은 거기서 끝났어요.",

@@ -188,6 +188,7 @@ pub enum LimitationCode {
     ProbeToolFailed,
     OwnershipNotVerified,
     ProbeTargetNotResponding,
+    ProbeStoppedBySeethru,
     ProbeRedirectedOutside,
     ProbePageNotRead,
     ProbeChecksPartial,

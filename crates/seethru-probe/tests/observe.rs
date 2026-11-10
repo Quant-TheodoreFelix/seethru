@@ -332,3 +332,36 @@ fn an_app_that_stops_answering_or_serves_no_page_is_a_limitation() {
     assert!(api.facts.is_empty());
     assert_eq!(sent.len(), 3);
 }
+
+struct Unwritable;
+
+impl Audit for Unwritable {
+    fn record(&mut self, _: &Entry) -> io::Result<()> {
+        Err(io::Error::other("disk full"))
+    }
+}
+
+#[test]
+fn a_request_that_cannot_be_recorded_is_not_sent_and_seethru_says_it_stopped() {
+    let mut net = Net {
+        sent: Vec::new(),
+        answer: app(GOOD.to_vec(), Vec::new()),
+    };
+    let mut log = Unwritable;
+    let mut time = Time::default();
+    let Ok(target) = Target::parse("https://app.example") else {
+        return;
+    };
+    let outcome = observe(
+        target,
+        token(),
+        Environment::Staging,
+        &mut net,
+        &mut log,
+        &mut time,
+    );
+    assert!(net.sent.is_empty(), "{:?}", net.sent);
+    assert!(!outcome.verified);
+    assert!(outcome.facts.is_empty());
+    assert_eq!(outcome.problems, [LimitationCode::ProbeStoppedBySeethru]);
+}

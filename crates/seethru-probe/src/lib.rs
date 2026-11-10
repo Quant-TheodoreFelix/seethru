@@ -85,10 +85,8 @@ fn problem(stop: Stop) -> LimitationCode {
     match stop {
         Stop::NotOwned | Stop::ProductionNotConfirmed => LimitationCode::OwnershipNotVerified,
         Stop::RedirectedOutside => LimitationCode::ProbeRedirectedOutside,
-        Stop::NotResponding
-        | Stop::AddressNotAllowed
-        | Stop::TooManyRequests
-        | Stop::AuditFailed => LimitationCode::ProbeTargetNotResponding,
+        Stop::NotResponding | Stop::AddressNotAllowed => LimitationCode::ProbeTargetNotResponding,
+        Stop::TooManyRequests | Stop::AuditFailed => LimitationCode::ProbeStoppedBySeethru,
     }
 }
 

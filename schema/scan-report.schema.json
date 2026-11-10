@@ -675,6 +675,7 @@
         "probeToolFailed",
         "ownershipNotVerified",
         "probeTargetNotResponding",
+        "probeStoppedBySeethru",
         "probeRedirectedOutside",
         "probePageNotRead",
         "probeChecksPartial"
