@@ -87,7 +87,7 @@ export type TargetInput =
   | { type: "compileDatabase"; path: string; files: number }
   | { type: "compiledOutput"; path: string; files: number; functions: number; machineCode: boolean };
 
-export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes"] as const;
+export const LIMITATION_CODES = ["buildOutputNotRead", "buildOutputStale", "buildOutputWithoutSourceMaps", "dashboardPoliciesUnseen", "externalNotVerified", "externalResultsDropped", "firmwareProtectionNotChecked", "nativeCodePartlyRead", "projectKindNotRecognized", "compiledOutputNotRead", "compiledChecksPartial", "compiledOutputWithoutMachineCode", "compiledOutputNotOptimized", "compiledOutputPartlyRead", "compiledOutputWithoutWipes", "outsideEntriesNotFound"] as const;
 export type LimitationCode = (typeof LIMITATION_CODES)[number];
 
 export interface Location {
@@ -172,7 +172,7 @@ export interface Limitation {
   text: LocalizedText;
 }
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export interface ScanReport {
   schemaVersion: typeof SCHEMA_VERSION;

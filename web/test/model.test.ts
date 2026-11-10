@@ -13,7 +13,7 @@ import {
 
 function validReport(): Record<string, unknown> {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     tool: { name: "seethru", version: "0.1.0" },
     target: {
       name: "app",
@@ -202,8 +202,8 @@ test("rejects unknown enum values and node types", () => {
 });
 
 test("rejects wrong schema versions and non objects", () => {
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 8 }), /version 9 expected/);
-  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 10 }), ReportError);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 9 }), /version 10 expected/);
+  assert.throws(() => parseScanReport({ ...validReport(), schemaVersion: 11 }), ReportError);
   assert.throws(() => parseScanReport(null), ReportError);
   assert.throws(() => parseScanReport([]), ReportError);
 });
