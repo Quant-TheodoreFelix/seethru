@@ -79,6 +79,7 @@ export interface Messages {
   acceptedLabel: string;
   reason: string;
   findingId: string;
+  proofFile: string;
   evidence: string;
   limitations: string;
 }
@@ -228,6 +229,7 @@ const en: Messages = {
   acceptedLabel: "Accepted",
   reason: "Reason:",
   findingId: "Finding ID",
+  proofFile: "Proof file",
   evidence: "How it gets there",
   limitations: "Not checked",
 };
@@ -372,6 +374,7 @@ const ko: Messages = {
   acceptedLabel: "허용함",
   reason: "사유:",
   findingId: "문제 ID",
+  proofFile: "증거 파일",
   evidence: "어떻게 닿는지",
   limitations: "확인하지 못한 것",
 };

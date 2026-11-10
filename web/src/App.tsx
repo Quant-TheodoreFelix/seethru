@@ -428,6 +428,12 @@ function ReportView({ report, theme }: { report: ScanReport; theme: Theme }) {
                     <code>{selected.cwe.map((number) => `CWE-${number}`).join(", ")}</code>
                   </p>
                 ) : null}
+                {selected.proof ? (
+                  <p className="finding-id">
+                    <span>{m.proofFile}</span>
+                    <code>{`.seethru/${selected.proof}`}</code>
+                  </p>
+                ) : null}
                 {selected.origin.engine !== "seethru" ? (
                   <p className="finding-id">
                     <span>{m.reportedBy}</span>
