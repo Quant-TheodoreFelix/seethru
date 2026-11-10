@@ -97,6 +97,26 @@ pub fn scan(root: &Path) -> Result<ScanReport, ScanError> {
     scan_with(root, ScanOptions::default())
 }
 
+pub fn cargo_projects(root: &Path, read_config: bool) -> Result<Vec<String>, ScanError> {
+    let root = std::fs::canonicalize(root).map_err(ScanError::Io)?;
+    if !root.is_dir() {
+        return Err(ScanError::NotADirectory);
+    }
+    let config = if read_config {
+        Config::load(&root)?
+    } else {
+        None
+    };
+    let walked = walk::walk(&root, cargo::is_manifest, |rel_path| {
+        config
+            .as_ref()
+            .is_some_and(|config| config.is_excluded(rel_path))
+    })?;
+    Ok(cargo::top_dirs(
+        walked.entries.iter().map(|entry| entry.rel_path.as_str()),
+    ))
+}
+
 pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanError> {
     let given = std::path::absolute(root).map_err(ScanError::Io)?;
     let root = std::fs::canonicalize(root).map_err(ScanError::Io)?;

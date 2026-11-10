@@ -92,7 +92,7 @@ fn builds_a_rust_project_and_reads_what_it_built() -> std::io::Result<()> {
     let plain = scan(&dir, &[])?;
     assert!(plain.status.success());
     assert!(divisions(&plain).is_empty());
-    assert!(!dir.join(".seethru/build").exists());
+    assert!(!dir.join(".seethru/build/root").exists());
 
     let built = scan(&dir, &["--build"])?;
     let messages = String::from_utf8_lossy(&built.stderr).into_owned();
@@ -105,7 +105,7 @@ fn builds_a_rust_project_and_reads_what_it_built() -> std::io::Result<()> {
             "likely".to_owned()
         )]
     );
-    assert!(dir.join(".seethru/build/seethru-units").is_file());
+    assert!(dir.join(".seethru/build/root/seethru-units").is_file());
     assert!(!dir.join("target").exists());
 
     let source = dir.join("vault/src/lib.rs");
@@ -127,7 +127,7 @@ fn output_of_an_earlier_target_is_not_read_again() -> std::io::Result<()> {
     let first = scan_for(&dir, &["--build"], Some(&host))?;
     assert!(first.status.success());
     assert_eq!(divisions(&first).len(), 1);
-    assert!(dir.join(".seethru/build").join(&host).is_dir());
+    assert!(dir.join(".seethru/build/root").join(&host).is_dir());
 
     let source = dir.join("vault/src/lib.rs");
     let text = fs::read_to_string(&source)?;
@@ -135,7 +135,7 @@ fn output_of_an_earlier_target_is_not_read_again() -> std::io::Result<()> {
     let second = scan(&dir, &["--build"])?;
     assert!(second.status.success());
     assert!(divisions(&second).is_empty());
-    assert!(!dir.join(".seethru/build").join(&host).exists());
+    assert!(!dir.join(".seethru/build/root").join(&host).exists());
     Ok(())
 }
 
@@ -157,11 +157,49 @@ fn refuses_to_build_without_a_manifest_or_a_lock_file() -> std::io::Result<()> {
     let output = scan(&dir, &["--build"])?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Cargo.lock"));
-    assert!(!dir.join(".seethru/build").exists());
+    assert!(!dir.join(".seethru/build/root").exists());
 
     fs::remove_file(dir.join("Cargo.toml"))?;
+    fs::remove_file(dir.join("vault/Cargo.toml"))?;
     let output = scan(&dir, &["--build"])?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Cargo.toml"));
+    Ok(())
+}
+
+#[test]
+fn builds_a_project_that_sits_in_a_subfolder() -> std::io::Result<()> {
+    let inner = project("build-nested/app")?;
+    let outer = inner.parent().unwrap_or(&inner).to_path_buf();
+    let built = scan(&outer, &["--build"])?;
+    let messages = String::from_utf8_lossy(&built.stderr).into_owned();
+    assert!(built.status.success(), "{messages}");
+    assert_eq!(
+        divisions(&built),
+        [(
+            "secret-dependent-division:file:app/vault/src/lib.rs:1".to_owned(),
+            "likely".to_owned()
+        )]
+    );
+    assert!(outer.join(".seethru/build/app/seethru-units").is_file());
+    Ok(())
+}
+
+#[test]
+fn reads_a_program_that_compiles_but_cannot_be_linked() -> std::io::Result<()> {
+    let dir = project("build-unlinked")?;
+    let manifest = dir.join("vault/Cargo.toml");
+    let mut text = fs::read_to_string(&manifest)?;
+    text.push_str("\n[[bin]]\nname = \"probe\"\npath = \"src/probe.rs\"\n");
+    fs::write(&manifest, text)?;
+    fs::write(
+        dir.join("vault/src/probe.rs"),
+        "#![no_main]\n\n#[unsafe(no_mangle)]\npub extern \"C\" fn probe(vault: &mut vault::Vault, modulus: u32) -> u32 {\n    vault::open_once(vault, modulus)\n}\n",
+    )?;
+    let built = scan(&dir, &["--build"])?;
+    let messages = String::from_utf8_lossy(&built.stderr).into_owned();
+    assert!(built.status.success(), "{messages}");
+    assert!(messages.contains("could not be linked"), "{messages}");
+    assert_eq!(divisions(&built).len(), 1, "{messages}");
     Ok(())
 }

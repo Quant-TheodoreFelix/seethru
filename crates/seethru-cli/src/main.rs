@@ -214,7 +214,8 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             build,
         } => {
             if build {
-                llvm_ir.extend(build::build(&path, &state_dir(&path)?, lang)?);
+                let projects = seethru_analyzer::cargo_projects(&path, read_config)?;
+                llvm_ir.extend(build::build(&path, &state_dir(&path)?, &projects, lang)?);
             }
             let options = seethru_analyzer::ScanOptions {
                 read_config,

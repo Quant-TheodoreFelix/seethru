@@ -66,6 +66,18 @@ pub(crate) fn is_manifest(rel_path: &str) -> bool {
     rel_path == MANIFEST || rel_path.ends_with("/Cargo.toml")
 }
 
+pub(crate) fn top_dirs<'a>(rel_paths: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let dirs: BTreeSet<&str> = rel_paths
+        .filter(|path| is_manifest(path))
+        .map(dir_of)
+        .collect();
+    dirs.iter()
+        .copied()
+        .filter(|dir| !dirs.iter().any(|other| other != dir && under(dir, other)))
+        .map(str::to_owned)
+        .collect()
+}
+
 fn dir_of(rel_path: &str) -> &str {
     rel_path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
