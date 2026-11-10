@@ -154,6 +154,7 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
             firmware_ota_unguarded(&entry, writer.as_deref(), &place, lang)
         }
         (RuleId::SecretDependentDivision, _) => secret_division(&place, lang),
+        (RuleId::StopOnOutsideInput, _) => stop_on_outside_input(&place, lang),
         (RuleId::CargoDependencyNotPinned, _) => dependency_not_pinned(&clean(label), &place, lang),
         _ => format!("{}{place}", clean(finding.title.get(lang))),
     };
@@ -455,6 +456,27 @@ fn secret_division(place: &str, lang: Lang) -> String {
              3. 비밀이라면 나눗셈을 모든 값에서 같은 시간이 걸리는 연산으로 바꿔 줘. 예를 들면 그 나누는 수에 맞게 계산한 상수로 곱하고 시프트하는 방식이야. 입력 범위 전체에서 결과가 전과 같아야 해.\n\
              4. 입력 범위 전체에서 새 코드와 기존 나눗셈을 비교하는 테스트를 추가해 줘. 범위가 너무 크면 경계 값과 무작위 값 여러 개로 비교해 줘.\n\
              5. 알고리즘의 다른 부분은 바꾸지 마. 나눗셈이 사라졌는지는 컴파일된 코드에서만 보이니까, 다시 빌드하고 검사를 다시 돌리라고 알려 줘."
+        ),
+    }
+}
+
+fn stop_on_outside_input(place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!(
+            "The compiled code of this project keeps a check that panics, and the value it tests comes from outside through an exported entry point such as a system call handler.{place} A panic stops the program, and in a kernel or firmware it stops the whole system.\n\
+             1. Read the code at that line and find what can panic there: an index or slice range, an arithmetic overflow, `unwrap`, `expect` or an assertion.\n\
+             2. Follow the value back to the entry point and list every check it passes on the way.\n\
+             3. If those checks already make the panic impossible, change nothing. Tell me which check does it and where, so I can record the reason.\n\
+             4. If a caller can make it fail, handle the bad value before this line and return an error to the caller. Use `get`, `checked_add` and similar calls that return a result instead of panicking.\n\
+             5. Do not hide the problem with wrapping arithmetic or by clamping the value unless that is the correct behavior. Tell me to build again and rerun the scan, because only the compiled code shows whether the check is gone."
+        ),
+        Lang::Ko => format!(
+            "이 프로젝트의 컴파일된 코드에 panic하는 검사가 남아 있고, 그 검사가 보는 값이 시스템 콜 처리 함수 같은 외부 진입점으로 밖에서 들어와.{place} panic은 프로그램을 멈추고, 커널이나 펌웨어에서는 시스템 전체를 멈춰.\n\
+             1. 그 줄의 코드를 읽고 무엇이 panic할 수 있는지 찾아 줘. 인덱스나 슬라이스 범위, 산술 오버플로, `unwrap`, `expect`, assert 중 하나야.\n\
+             2. 그 값을 진입점까지 거슬러 올라가면서 중간에 거치는 검사를 모두 적어 줘.\n\
+             3. 그 검사들이 이미 panic을 불가능하게 만든다면 아무것도 바꾸지 마. 어느 검사가 어디서 막는지 알려 줘. 내가 사유로 기록할게.\n\
+             4. 호출자가 실패하게 만들 수 있다면, 이 줄 전에 잘못된 값을 처리하고 호출자에게 오류를 돌려줘. `get`, `checked_add`처럼 panic 대신 결과를 돌려주는 호출을 써 줘.\n\
+             5. 그게 올바른 동작이 아니라면 wrapping 연산이나 값 자르기로 문제를 가리지 마. 검사가 사라졌는지는 컴파일된 코드에서만 보이니까, 다시 빌드하고 검사를 다시 돌리라고 알려 줘."
         ),
     }
 }
