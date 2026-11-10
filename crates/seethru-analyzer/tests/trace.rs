@@ -563,3 +563,25 @@ fn deep_chains_of_returns_finish_quickly() {
     assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
     assert!(exposure(&report, "entry:httpRoute:/api/chain").is_some());
 }
+
+#[test]
+fn routes_in_two_next_apps_get_separate_entry_points() {
+    let project = TempProject::new("trace-roots");
+    for app in ["apps/shop", "apps/admin"] {
+        project.write(&format!("{app}/next.config.mjs"), "export default {};\n");
+        project.write(
+            &format!("{app}/app/api/purge/route.ts"),
+            "import { createClient } from \"@supabase/supabase-js\";\n\
+const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);\n\
+export async function POST() {\n  await admin.from(\"orders\").delete().neq(\"id\", 0);\n}\n",
+        );
+    }
+    let Some(report) = scan(&project) else { return };
+    assert_eq!(
+        unguarded(&report),
+        vec![
+            ("entry:httpRoute:apps/admin:/api/purge", Severity::High),
+            ("entry:httpRoute:apps/shop:/api/purge", Severity::High),
+        ]
+    );
+}

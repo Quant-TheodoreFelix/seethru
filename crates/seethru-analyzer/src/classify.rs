@@ -192,6 +192,10 @@ impl ProjectHints {
         found
     }
 
+    pub(crate) fn has_many_next_roots(&self) -> bool {
+        self.next_roots.len() > 1
+    }
+
     pub(crate) fn next_root_for(&self, rel_dir: &str) -> Option<&str> {
         deepest_root(&self.next_roots, rel_dir)
     }

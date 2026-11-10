@@ -677,8 +677,32 @@ fn strip_extension(path: &str) -> &str {
     }
 }
 
+pub(crate) fn route_id(hints: &ProjectHints, source: &str, url: &str) -> String {
+    match hints.next_root_for(source) {
+        Some(root) if hints.has_many_next_roots() => {
+            format!("entry:httpRoute:{}:{url}", root_label(root))
+        }
+        _ => format!("entry:httpRoute:{url}"),
+    }
+}
+
+fn root_label(root: &str) -> &str {
+    if root.is_empty() { "." } else { root }
+}
+
+fn functions_dir(path: &str) -> Option<&str> {
+    let at = path.rfind("supabase/functions/")?;
+    Some(path[..at].trim_end_matches('/'))
+}
+
 fn entries(project: &Project<'_>, hints: &ProjectHints) -> Vec<Entry> {
     let mut found = Vec::new();
+    let function_dirs: BTreeSet<&str> = project
+        .modules
+        .iter()
+        .filter(|module| module.role == FileRole::EdgeFunction)
+        .filter_map(|module| functions_dir(&module.rel_path))
+        .collect();
     for (file, module) in project.modules.iter().enumerate() {
         if module.flow.opaque {
             continue;
@@ -696,8 +720,14 @@ fn entries(project: &Project<'_>, hints: &ProjectHints) -> Vec<Entry> {
                     _ => None,
                 })
                 .collect();
+            let id = match functions_dir(path) {
+                Some(dir) if function_dirs.len() > 1 => {
+                    format!("entry:httpRoute:{}:/functions/v1/{name}", root_label(dir))
+                }
+                _ => format!("entry:httpRoute:/functions/v1/{name}"),
+            };
             found.push(Entry {
-                id: format!("entry:httpRoute:/functions/v1/{name}"),
+                id,
                 label: format!("/functions/v1/{name}"),
                 kind: EntryKind::EdgeFunction,
                 channel: Channel::HttpRoute,
@@ -729,7 +759,13 @@ fn entries(project: &Project<'_>, hints: &ProjectHints) -> Vec<Entry> {
                 .into_iter()
                 .map(|(target, method)| (target, format!("{method} {url}")))
                 .collect();
-            found.push(route_entry(file, &url, handlers, root));
+            found.push(route_entry(
+                file,
+                route_id(hints, path, &url),
+                &url,
+                handlers,
+                root,
+            ));
         } else if let Some(rest) = inner.strip_prefix("pages/api/") {
             let mut url = format!("/api/{}", strip_extension(rest));
             if let Some(parent) = url.strip_suffix("/index") {
@@ -740,7 +776,13 @@ fn entries(project: &Project<'_>, hints: &ProjectHints) -> Vec<Entry> {
                 .into_iter()
                 .map(|(target, _)| (target, url.clone()))
                 .collect();
-            found.push(route_entry(file, &url, handlers, root));
+            found.push(route_entry(
+                file,
+                route_id(hints, path, &url),
+                &url,
+                handlers,
+                root,
+            ));
         } else if module.directive == Some(Directive::UseServer) {
             for name in module.flow.exports.keys() {
                 let handlers = project.handlers(file, &[name.as_str()]);
@@ -767,9 +809,15 @@ fn entries(project: &Project<'_>, hints: &ProjectHints) -> Vec<Entry> {
     found
 }
 
-fn route_entry(file: usize, url: &str, handlers: Vec<(FnRef, String)>, root: &str) -> Entry {
+fn route_entry(
+    file: usize,
+    id: String,
+    url: &str,
+    handlers: Vec<(FnRef, String)>,
+    root: &str,
+) -> Entry {
     Entry {
-        id: format!("entry:httpRoute:{url}"),
+        id,
         label: url.to_owned(),
         kind: EntryKind::Route,
         channel: Channel::HttpRoute,

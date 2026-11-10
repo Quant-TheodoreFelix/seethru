@@ -210,7 +210,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             let assigned = assigned_of(&route.source, FileRole::ServerCode);
             let file_id = graph.add_file(&route.source, assigned.role, assigned.basis);
             let entry_id = graph.add_node(Node {
-                id: NodeId::new(format!("entry:httpRoute:{}", route.url)),
+                id: NodeId::new(trace::route_id(&hints, &route.source, &route.url)),
                 label: route.url.clone(),
                 kind: NodeKind::EntryPoint {
                     channel: Channel::HttpRoute,
