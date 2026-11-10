@@ -246,7 +246,7 @@ fn scan(
         return Err(format!(
             "The user has not allowed the outside tool {name:?}. Do not try another way. Ask \
              the user whether they want seethru to run it, and if yes, to restart the seethru \
-             MCP server with --tool for it."
+             MCP server with --allow-build and --tool for it."
         ));
     }
     let root = resolve(host, given)?;
@@ -360,7 +360,7 @@ fn permissions(host: &dyn Host) -> Value {
         "toAllowMore": {
             "folder": "seethru mcp --root DIR",
             "build": "seethru mcp --root DIR --allow-build",
-            "tool": "seethru mcp --root DIR --tool NAME",
+            "tool": "seethru mcp --root DIR --allow-build --tool NAME",
         },
         "whoDecides": "Only the user can change this, by restarting the server with other flags. Tool arguments cannot.",
         "askFirst": ASK_FIRST,
