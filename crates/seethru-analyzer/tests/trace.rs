@@ -475,6 +475,11 @@ export async function withUser(req: Request, run: (user: unknown) => Promise<Res
             "",
             "  const supabase = await createClient();\n  const { error } = await supabase.auth.getSession();\n  if (error) return new Response(\"no\");\n  await admin.from(\"orders\").delete().eq(\"id\", 1);",
         ),
+        (
+            "rpc",
+            "",
+            "  await admin.rpc(\"exec_sql\", { sql: \"select 1\" });",
+        ),
     ];
     for (name, imports, body) in routes {
         project.write(
@@ -513,6 +518,7 @@ export async function withUser(req: Request, run: (user: unknown) => Promise<Res
         ("missing", Exposure::Unknown),
         ("object", Exposure::Unknown),
         ("error", Exposure::Unknown),
+        ("rpc", Exposure::Public),
         ("mixed", Exposure::Unknown),
         ("crowded", Exposure::Authenticated),
         ("crowdedopen", Exposure::Unknown),
@@ -521,7 +527,17 @@ export async function withUser(req: Request, run: (user: unknown) => Promise<Res
         let id = format!("entry:httpRoute:/api/{name}");
         assert_eq!(exposure(&report, &id), Some(wanted), "{id}");
     }
-    assert!(unguarded(&report).is_empty());
+    assert_eq!(
+        unguarded(&report),
+        vec![("entry:httpRoute:/api/rpc", Severity::High)]
+    );
+    let rpc_step = report
+        .findings
+        .iter()
+        .find(|finding| finding.node.as_str() == "entry:httpRoute:/api/rpc")
+        .and_then(|finding| finding.evidence.last())
+        .map(|step| (step.label.as_str(), step.via));
+    assert_eq!(rpc_step, Some(("exec_sql()", Some(EdgeKind::Calls))));
 }
 
 #[test]

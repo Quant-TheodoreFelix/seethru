@@ -1160,10 +1160,10 @@ pub(crate) fn emit(
         let (target_label, target_id) = target_node(&access.target);
         evidence.push(step(
             &target_label,
-            Some(if access.op == Op::Read || access.op == Op::Rpc {
-                EdgeKind::Reads
-            } else {
-                EdgeKind::Writes
+            Some(match access.op {
+                Op::Read => EdgeKind::Reads,
+                Op::Rpc => EdgeKind::Calls,
+                Op::Write | Op::Admin => EdgeKind::Writes,
             }),
             target_id,
             Some(access.location.clone()),

@@ -39,7 +39,7 @@ pub(crate) enum Op {
 
 impl Op {
     pub(crate) fn changes_data(self) -> bool {
-        matches!(self, Self::Write | Self::Admin)
+        matches!(self, Self::Write | Self::Admin | Self::Rpc)
     }
 }
 
