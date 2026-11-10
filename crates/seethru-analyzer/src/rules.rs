@@ -1108,6 +1108,24 @@ pub(crate) fn secret_dependent_division(file: &str, line: u32, confirmed: bool) 
     }
 }
 
+pub(crate) fn secret_division_in_assembly(file: &str, line: u32) -> Text {
+    let file = display_name(file);
+    Text {
+        title: LocalizedText {
+            en: format!(
+                "Hand-written assembly at line {line} of `{file}` takes a secret value and divides"
+            ),
+            ko: format!(
+                "`{file}` {line}번째 줄의 직접 쓴 어셈블리가 비밀 값을 받고 그 안에서 나눗셈을 해요"
+            ),
+        },
+        explanation: LocalizedText {
+            en: "How long a processor takes to divide depends on the numbers it is given. The machine code built from the assembly block at this line has a division instruction, and a value that comes from memory the program wipes after use goes into the block. That is how seethru recognizes a secret. Which value the block divides is not visible to seethru, so read the block to check. Someone who can measure how long this code takes may learn part of the secret. If the value that is divided is not secret, accept this finding in `seethru.toml` with a reason.".to_owned(),
+            ko: "프로세서가 나눗셈에 쓰는 시간은 숫자에 따라 달라져요. 이 줄의 어셈블리 블록으로 만든 기계어에 나눗셈 명령이 있고, 프로그램이 쓰고 나서 지우는 메모리에서 나온 값이 이 블록으로 들어가요. seethru는 그렇게 지우는 값을 비밀로 봐요. 블록 안에서 어느 값을 나누는지는 seethru가 보지 못하니, 블록을 읽고 확인하세요. 이 코드가 걸리는 시간을 잴 수 있는 사람은 비밀의 일부를 알아낼 수 있어요. 나누는 값이 비밀이 아니라면 `seethru.toml`에 사유를 적고 이 탐지를 받아들이세요.".to_owned(),
+        },
+    }
+}
+
 pub(crate) fn cargo_dependency_not_pinned(name: &str, manifest: &str, git: bool) -> Text {
     let name = display_name(name);
     let manifest = display_name(manifest);
@@ -1181,8 +1199,8 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
             "컴파일 결과에서는 비밀 값이 나눗셈에 닿는지만 확인해요. 비밀에 따라 갈리는 분기와 표 조회는 아직 확인하지 않아요. 메모리 소거가 남는지는 링크된 프로그램에서만, `--tool`로 허락했을 때 확인해요. 코드에 적힌 호출(예: `zeroize()`)로 쓰고 나서 지우는 메모리에 든 값만 비밀로 봐요. 타입이 drop될 때 알아서 지우는 메모리는 세지 않아요. 라이브러리의 결과는 최종 링크 전 단계라 실제 배포되는 프로그램과 다를 수 있어요.",
         ),
         LimitationCode::CompiledOutputWithoutMachineCode => (
-            "Some compiled files had no machine code listing (`.s`) next to them, so findings there could not be confirmed and need review.",
-            "컴파일 결과 중 일부는 옆에 기계어 목록(`.s`)이 없어서, 그 부분의 탐지는 확정하지 못했고 직접 확인이 필요해요.",
+            "Some compiled files had no usable machine code listing next to them (a `.s` file with line information), so findings there could not be confirmed and need review. The list of what the machine code has covers only the other files.",
+            "컴파일 결과 중 일부는 옆에 쓸 수 있는 기계어 목록(줄 정보가 있는 `.s` 파일)이 없어서, 그 부분의 탐지는 확정하지 못했고 직접 확인이 필요해요. 기계어에서 본 것의 목록에는 나머지 파일만 들어 있어요.",
         ),
         LimitationCode::CompiledOutputNotOptimized => (
             "The compiled output looks like a debug build. Check a release build, because that is what ships and the compiler changes the code a lot on the way.",
@@ -1195,6 +1213,14 @@ pub(crate) fn limitation(code: LimitationCode) -> Limitation {
         LimitationCode::OutsideEntriesNotFound => (
             "The compiled output has no exported entry point that takes arguments, so values from outside were not followed and checks that can stop the program were not looked for. That check works for kernels, firmware and libraries called from other languages.",
             "컴파일 결과에 인자를 받는 외부 진입점이 없어서, 밖에서 온 값을 따라가지 못했고 프로그램을 멈출 수 있는 검사도 찾지 않았어요. 이 검사는 커널, 펌웨어, 다른 언어에서 부르는 라이브러리에서 동작해요.",
+        ),
+        LimitationCode::MachineCodeProcessorNotKnown => (
+            "Some compiled files are for a processor whose instructions seethru does not know, so division instructions and conditional jumps in their machine code may have been missed. The machine code list can be short for those files, and findings there may stay unconfirmed. Integer division and conditional jumps are known for x86, ARM and RISC-V.",
+            "컴파일 결과 중 일부는 seethru가 명령을 모르는 프로세서용이라, 그 기계어의 나눗셈 명령과 조건 분기를 놓쳤을 수 있어요. 그 파일들은 기계어 목록이 실제보다 짧을 수 있고, 탐지가 확정되지 않은 채로 남을 수 있어요. 정수 나눗셈과 조건 분기를 아는 프로세서는 x86, ARM, RISC-V예요.",
+        ),
+        LimitationCode::AssemblyOutsideFunctionsNotRead => (
+            "The compiled output has assembly written outside a function, such as `global_asm!` or a naked function. Division instructions in it are counted without a line, and conditional jumps in it were not looked for.",
+            "컴파일 결과에 함수 밖에 쓴 어셈블리(`global_asm!`나 naked 함수)가 있어요. 그 안의 나눗셈 명령은 줄 없이 개수로만 셌고, 조건 분기는 찾지 않았어요.",
         ),
         LimitationCode::BinaryToolNotPermitted => (
             "A built program was there to look at, but seethru was not allowed to run the tools that read it, so whether memory wipes survive in the program you ship was not checked. Add `--tool objdump --tool dwarfdump` to allow it. Both are needed.",
@@ -1319,6 +1345,7 @@ mod tests {
             super::external("gcc", "x", &[99_999], "main.c", 1),
             super::secret_dependent_division("vault/src/lib.rs", 12, true),
             super::secret_dependent_division("vault/src/lib.rs", 12, false),
+            super::secret_division_in_assembly("vault/src/lib.rs", 12),
             super::stop_on_outside_input("kernel/src/main.rs", 40),
             super::cargo_dependency_not_pinned("helper", "Cargo.toml", true),
             super::cargo_dependency_not_pinned("helper", "app/Cargo.toml", false),

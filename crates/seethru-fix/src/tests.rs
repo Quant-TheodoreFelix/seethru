@@ -144,6 +144,7 @@ fn secret_report(label: &str) -> (ScanReport, String) {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: Summary::default(),
         nodes: vec![node],
@@ -222,6 +223,7 @@ fn schema_missing_prompt_turns_rls_on_and_asks_to_compare_policies() {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: Summary::default(),
         nodes: vec![table],
@@ -358,6 +360,7 @@ fn outside_scanner_prompt_keeps_scanner_text_out() {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: Summary::default(),
         nodes: Vec::new(),
@@ -422,6 +425,7 @@ fn rust_prompts_name_the_line_and_ask_for_a_rebuild() {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: Summary::default(),
         nodes: vec![Node {
@@ -444,5 +448,22 @@ fn rust_prompts_name_the_line_and_ask_for_a_rebuild() {
     }
     assert!(fix_prompt(&report, &division, Lang::En).contains("build again"));
     assert!(has_hangul(&fix_prompt(&report, &division, Lang::Ko)));
+    let mut by_hand = division.clone();
+    by_hand.id = "secret-dependent-division:file:vault/src/lib.rs:asm:1".to_owned();
+    let (plain, block) = (
+        fix_prompt(&report, &division, Lang::En),
+        fix_prompt(&report, &by_hand, Lang::En),
+    );
+    assert!(plain.starts_with("The compiled code of this project divides a value"));
+    assert!(block.starts_with("A hand-written assembly block in this project takes a value"));
+    assert!(block.contains("Which value the block divides is not known yet"));
+    assert!(block.contains("`vault/src/lib.rs:18`") && block.contains("build again"));
+    assert!(!block.contains("rem_euclid") && !plain.contains("asm!"));
+    let block = fix_prompt(&report, &by_hand, Lang::Ko);
+    assert!(
+        block.starts_with("이 프로젝트의 직접 쓴 어셈블리 블록이"),
+        "{block}"
+    );
+    assert!(block.contains("어느 값을 나누는지는 아직 몰라"), "{block}");
     assert!(has_hangul(&fix_prompt(&report, &loose, Lang::Ko)));
 }

@@ -816,6 +816,7 @@ mod tests {
                 ecosystems: Vec::new(),
                 inputs: Vec::new(),
                 limitations: Vec::new(),
+                machine_code: None,
             },
             summary: Summary::from_findings(&findings),
             nodes: Vec::new(),

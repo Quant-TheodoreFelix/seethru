@@ -24,6 +24,7 @@ fn report() -> ScanReport {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: Summary::default(),
         nodes: vec![Node {

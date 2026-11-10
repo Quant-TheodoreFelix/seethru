@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LocalizedText, MaskedSecret};
 
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -39,6 +39,38 @@ pub struct TargetInfo {
     pub ecosystems: Vec<Ecosystem>,
     pub inputs: Vec<Input>,
     pub limitations: Vec<Limitation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_code: Option<MachineCode>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MachineCode {
+    pub divisions: u32,
+    pub divisions_without_line: u32,
+    pub division_lines: Vec<DivisionLine>,
+    pub assembly_blocks: u32,
+    pub assembly_blocks_without_line: u32,
+    pub assembly_lines: Vec<AssemblyLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DivisionLine {
+    pub path: String,
+    pub line: u32,
+    pub secret: bool,
+    pub assembly: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssemblyLine {
+    pub path: String,
+    pub line: u32,
+    pub divides: bool,
+    pub branches: bool,
+    pub secret: bool,
 }
 
 #[derive(
@@ -178,6 +210,8 @@ pub enum LimitationCode {
     CompiledOutputPartlyRead,
     CompiledOutputWithoutWipes,
     OutsideEntriesNotFound,
+    MachineCodeProcessorNotKnown,
+    AssemblyOutsideFunctionsNotRead,
     BinaryToolNotPermitted,
     BinaryToolFailed,
     BinaryNotFound,

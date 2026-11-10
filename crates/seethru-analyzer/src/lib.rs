@@ -476,6 +476,16 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
             if compiled.entries == 0 {
                 limitations.push(rules::limitation(LimitationCode::OutsideEntriesNotFound));
             }
+            if compiled.unknown_cpu {
+                limitations.push(rules::limitation(
+                    LimitationCode::MachineCodeProcessorNotKnown,
+                ));
+            }
+            if compiled.file_assembly {
+                limitations.push(rules::limitation(
+                    LimitationCode::AssemblyOutsideFunctionsNotRead,
+                ));
+            }
             if compiled.partial {
                 limitations.push(rules::limitation(LimitationCode::CompiledOutputPartlyRead));
             }
@@ -516,6 +526,7 @@ pub fn scan_with(root: &Path, options: ScanOptions) -> Result<ScanReport, ScanEr
         ecosystems,
         inputs,
         limitations,
+        machine_code: compiled.and_then(|compiled| compiled.machine),
     });
     if let Some(compiled) = build_list.filter(|compiled| !compiled.files.is_empty()) {
         for finding in &mut report.findings {

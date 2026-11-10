@@ -153,6 +153,9 @@ pub fn fix_prompt(report: &ScanReport, finding: &Finding, lang: Lang) -> String 
                 .map(|location| format!("`{}:{}`", clean(&location.path), location.line));
             firmware_ota_unguarded(&entry, writer.as_deref(), &place, lang)
         }
+        (RuleId::SecretDependentDivision, _) if finding.id.contains(":asm:") => {
+            secret_division_in_assembly(&place, lang)
+        }
         (RuleId::SecretDependentDivision, _) => secret_division(&place, lang),
         (RuleId::StopOnOutsideInput, _) => stop_on_outside_input(&place, lang),
         (RuleId::MemoryWipeRemoved, _) => memory_wipe_removed(&place, lang),
@@ -460,6 +463,27 @@ fn secret_division(place: &str, lang: Lang) -> String {
              2. 그 값이 정말 비밀인지 판단해 줘. 공개 값이면 아무것도 바꾸지 말고 이유를 알려 줘.\n\
              3. 비밀이라면 나눗셈을 모든 값에서 같은 시간이 걸리는 연산으로 바꿔 줘. 예를 들면 그 나누는 수에 맞게 계산한 상수로 곱하고 시프트하는 방식이야. 입력 범위 전체에서 결과가 전과 같아야 해.\n\
              4. 입력 범위 전체에서 새 코드와 기존 나눗셈을 비교하는 테스트를 추가해 줘. 범위가 너무 크면 경계 값과 무작위 값 여러 개로 비교해 줘.\n\
+             5. 알고리즘의 다른 부분은 바꾸지 마. 나눗셈이 사라졌는지는 컴파일된 코드에서만 보이니까, 다시 빌드하고 검사를 다시 돌리라고 알려 줘."
+        ),
+    }
+}
+
+fn secret_division_in_assembly(place: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!(
+            "A hand-written assembly block in this project takes a value that comes from secret data, and the machine code built from the block has a division instruction.{place} Which value the block divides is not known yet. Division takes a different amount of time for different numbers, so if the block divides the secret, the timing can leak it.\n\
+             1. Read the `asm!` block at that line. Find the division instruction and say which value it divides and which value it divides by.\n\
+             2. Decide whether either value is really secret. If both are public, change nothing and tell me why.\n\
+             3. If one is secret, replace the division with instructions that take the same time for every value, such as a multiplication and a shift by constants worked out for that divisor, and keep the results identical for the whole input range.\n\
+             4. Add a test that compares the new block with the old division over the whole input range, or over the edges and many random values when the range is too large.\n\
+             5. Do not change anything else in the algorithm. Tell me to build again and rerun the scan, because only the compiled code shows whether the division is gone."
+        ),
+        Lang::Ko => format!(
+            "이 프로젝트의 직접 쓴 어셈블리 블록이 비밀 데이터에서 나온 값을 받고, 그 블록으로 만든 기계어에 나눗셈 명령이 있어.{place} 블록이 어느 값을 나누는지는 아직 몰라. 나눗셈은 숫자에 따라 걸리는 시간이 달라서, 블록이 비밀 값을 나눈다면 시간으로 비밀이 새어 나갈 수 있어.\n\
+             1. 그 줄의 `asm!` 블록을 읽어 줘. 나눗셈 명령을 찾고, 어느 값을 어느 값으로 나누는지 알려 줘.\n\
+             2. 두 값 중 하나라도 정말 비밀인지 판단해 줘. 둘 다 공개 값이면 아무것도 바꾸지 말고 이유를 알려 줘.\n\
+             3. 하나라도 비밀이라면 나눗셈을 모든 값에서 같은 시간이 걸리는 명령으로 바꿔 줘. 예를 들면 그 나누는 수에 맞게 계산한 상수로 곱하고 시프트하는 방식이야. 입력 범위 전체에서 결과가 전과 같아야 해.\n\
+             4. 입력 범위 전체에서 새 블록과 기존 나눗셈을 비교하는 테스트를 추가해 줘. 범위가 너무 크면 경계 값과 무작위 값 여러 개로 비교해 줘.\n\
              5. 알고리즘의 다른 부분은 바꾸지 마. 나눗셈이 사라졌는지는 컴파일된 코드에서만 보이니까, 다시 빌드하고 검사를 다시 돌리라고 알려 줘."
         ),
     }

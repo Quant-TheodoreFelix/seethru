@@ -228,3 +228,59 @@ fn finds_the_check_a_real_compiler_left_for_an_outside_value() -> std::io::Resul
     assert_eq!(lines, [first as u64], "{messages}");
     Ok(())
 }
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn reads_hand_written_assembly_in_a_library_that_has_no_program() -> std::io::Result<()> {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("build-by-hand");
+    if dir.exists() {
+        fs::remove_dir_all(&dir)?;
+    }
+    copy(&fixture().join("../rust-asm"), &dir)?;
+    let built = scan(&dir, &["--build"])?;
+    let messages = String::from_utf8_lossy(&built.stderr).into_owned();
+    assert!(built.status.success(), "{messages}");
+    assert_eq!(
+        divisions(&built),
+        [(
+            "secret-dependent-division:file:src/lib.rs:asm:1".to_owned(),
+            "review".to_owned()
+        )],
+        "{messages}"
+    );
+    let (divides, jumps) = if cfg!(target_arch = "x86_64") {
+        (24, 43)
+    } else {
+        (28, 47)
+    };
+    let line = |line: u32, divides: bool, branches: bool, secret: bool| {
+        serde_json::json!({
+            "path": "src/lib.rs",
+            "line": line,
+            "divides": divides,
+            "branches": branches,
+            "secret": secret,
+        })
+    };
+    let report: serde_json::Value = serde_json::from_slice(&built.stdout).unwrap_or_default();
+    assert_eq!(
+        report["target"]["machineCode"],
+        serde_json::json!({
+            "divisions": 2,
+            "divisionsWithoutLine": 0,
+            "divisionLines": [
+                { "path": "src/lib.rs", "line": divides, "secret": true, "assembly": true },
+                { "path": "src/lib.rs", "line": 62, "secret": false, "assembly": false },
+            ],
+            "assemblyBlocks": 3,
+            "assemblyBlocksWithoutLine": 0,
+            "assemblyLines": [
+                line(divides, true, false, true),
+                line(jumps, false, true, false),
+                line(56, false, false, false),
+            ],
+        }),
+        "{messages}"
+    );
+    Ok(())
+}

@@ -23,6 +23,7 @@ fn run(files: &[(&str, &str)]) -> seethru_core::ScanReport {
         ecosystems: Vec::new(),
         inputs: Vec::new(),
         limitations: Vec::new(),
+        machine_code: None,
     })
 }
 

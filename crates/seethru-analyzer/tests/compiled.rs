@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use common::TempProject;
 use seethru_analyzer::{ScanError, ScanOptions};
 use seethru_core::{
-    Confidence, Ecosystem, EdgeKind, Input, InputKind, LimitationCode, NodeKind, RuleId,
-    ScanReport, Severity, Unit,
+    AssemblyLine, Confidence, DivisionLine, Ecosystem, EdgeKind, Input, InputKind, LimitationCode,
+    MachineCode, NodeKind, RuleId, ScanReport, Severity, Unit,
 };
 
 fn fixture() -> PathBuf {
@@ -34,6 +34,25 @@ fn divisions(report: &ScanReport) -> Vec<(String, u32, Confidence)> {
             Some((location.path.clone(), location.line, finding.confidence))
         })
         .collect()
+}
+
+fn division_line(path: &str, line: u32, secret: bool, assembly: bool) -> DivisionLine {
+    DivisionLine {
+        path: path.to_owned(),
+        line,
+        secret,
+        assembly,
+    }
+}
+
+fn assembly_line(line: u32, divides: bool, branches: bool, secret: bool) -> AssemblyLine {
+    AssemblyLine {
+        path: "src/lib.rs".to_owned(),
+        line,
+        divides,
+        branches,
+        secret,
+    }
 }
 
 const UNIT: &str = r#"target triple = "aarch64-unknown-none"
@@ -160,6 +179,17 @@ fn fixture_reports_the_division_of_a_wiped_value_and_not_the_public_one() {
             LimitationCode::OutsideEntriesNotFound
         ]
     );
+    assert_eq!(
+        report.target.machine_code,
+        Some(MachineCode {
+            divisions: 2,
+            division_lines: vec![
+                division_line("vault/src/lib.rs", 18, true, false),
+                division_line("vault/src/lib.rs", 40, false, false),
+            ],
+            ..MachineCode::default()
+        })
+    );
     let package = report.nodes.iter().find(|node| {
         matches!(
             node.kind,
@@ -208,6 +238,7 @@ fn only_explicit_wipes_make_a_value_secret() {
             LimitationCode::CompiledOutputWithoutMachineCode
         ]
     );
+    assert_eq!(report.target.machine_code, None);
     let through_call = report
         .findings
         .iter()
@@ -271,17 +302,28 @@ fn shared_line(layout: &str, sealed: &str, open: &str) -> String {
             "OPEN",
             &format!("define i32 @{open}(ptr %public, i32 %m) !dbg !5"),
         );
-    format!("target datalayout = \"{layout}\"\n\n{unit}")
+    let triple = if layout.contains("m:o") {
+        "arm64-apple-macosx11.0.0"
+    } else {
+        "aarch64-unknown-none"
+    };
+    format!("target datalayout = \"{layout}\"\ntarget triple = \"{triple}\"\n\n{unit}")
 }
 
-fn scan_shared_line(name: &str, unit: &str, listing: &str) -> Vec<(String, u32, Confidence)> {
+fn shared_report(name: &str, unit: &str, listing: &str) -> Option<ScanReport> {
     let project = project(name);
     project.write("out/unit.ll", unit);
     project.write("out/unit.s", listing);
     let result =
         seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
     assert!(result.is_ok(), "{result:?}");
-    result.map(|report| divisions(&report)).unwrap_or_default()
+    result.ok()
+}
+
+fn scan_shared_line(name: &str, unit: &str, listing: &str) -> Vec<(String, u32, Confidence)> {
+    shared_report(name, unit, listing)
+        .map(|report| divisions(&report))
+        .unwrap_or_default()
 }
 
 #[test]
@@ -334,9 +376,257 @@ fn functions_are_matched_across_naming_styles_of_the_machine_code() {
 fn machine_code_with_unknown_function_names_is_still_matched_by_line() {
     let unit = shared_line("e-m:e-i64:64", "sealed", "open");
     let listing = "\t.file\t1 \"src/lib.rs\"\nfirst$entry:\n\t.loc\t1 2 5\n\tumull\tx0, w0, w1\n\tret\nsecond$entry:\n\t.loc\t1 2 5\n\tudiv\tw0, w0, w1\n\tret\n";
+    let Some(report) = shared_report("compiled-names-unknown", &unit, listing) else {
+        return;
+    };
     assert_eq!(
-        scan_shared_line("compiled-names-unknown", &unit, listing),
+        divisions(&report),
         [("src/lib.rs".to_owned(), 2, Confidence::Likely)]
+    );
+    assert_eq!(
+        report.target.machine_code,
+        Some(MachineCode {
+            divisions: 1,
+            division_lines: vec![division_line("src/lib.rs", 2, true, false)],
+            ..MachineCode::default()
+        })
+    );
+}
+
+#[test]
+fn an_unknown_processor_never_makes_a_finding_disappear() {
+    let unit = shared_line("e-m:e-i64:64", "sealed", "open")
+        .replace("aarch64-unknown-none", "powerpc64le-unknown-linux-gnu");
+    let listing = "\t.file\t1 \"src/lib.rs\"\nsealed:\n\t.loc\t1 2 5\n\tdivdu\t3, 3, 4\n\tblr\nopen:\n\t.loc\t1 2 5\n\tdivdu\t3, 3, 4\n\tblr\n";
+    let Some(report) = shared_report("compiled-unknown-processor", &unit, listing) else {
+        return;
+    };
+    assert_eq!(
+        divisions(&report),
+        [("src/lib.rs".to_owned(), 2, Confidence::Review)]
+    );
+    assert!(codes(&report).contains(&LimitationCode::MachineCodeProcessorNotKnown));
+    assert_eq!(report.target.machine_code, Some(MachineCode::default()));
+
+    let known = shared_line("e-m:e-i64:64", "sealed", "open");
+    let Some(report) = shared_report("compiled-known-processor", &known, listing) else {
+        return;
+    };
+    assert_eq!(divisions(&report), []);
+    assert!(!codes(&report).contains(&LimitationCode::MachineCodeProcessorNotKnown));
+}
+
+#[test]
+fn files_without_machine_code_are_named_next_to_the_list() {
+    let project = project("compiled-mixed");
+    project.write("out/unit.s", LISTING);
+    project.write(
+        "out/other.ll",
+        &shared_line("e-m:e-i64:64", "sealed_twice", "open_twice"),
+    );
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+    assert!(codes(&report).contains(&LimitationCode::CompiledOutputWithoutMachineCode));
+    let machine = report.target.machine_code.unwrap_or_default();
+    assert_eq!(machine.divisions, 2);
+    assert_eq!(
+        machine.division_lines,
+        [
+            division_line("src/lib.rs", 2, true, false),
+            division_line("src/lib.rs", 20, true, false),
+        ]
+    );
+}
+
+#[test]
+fn a_long_machine_code_list_is_cut_and_said_to_be_partial() {
+    let mut body = String::new();
+    let mut places = String::new();
+    let mut listing = String::from("\t.file\t1 \"src/lib.rs\"\nmany:\n");
+    for line in 1..=501u32 {
+        let id = line + 10;
+        body += &format!("  %r{line} = urem i32 %a, %b, !dbg !{id}\n");
+        places += &format!("!{id} = !DILocation(line: {line}, column: 5, scope: !4)\n");
+        listing += &format!("\t.loc\t1 {line} 5\n\tudiv\tw0, w0, w1\n");
+    }
+    let unit = format!(
+        "target triple = \"aarch64-unknown-none\"\n\ndefine i32 @many(i32 %a, i32 %b) !dbg !4 {{\nstart:\n{body}  ret i32 %r1\n}}\n\n!1 = !DIFile(filename: \"src/lib.rs\", directory: \"\")\n!4 = distinct !DISubprogram(name: \"many\", file: !1, line: 1)\n{places}"
+    );
+    let Some(report) = shared_report("compiled-long-list", &unit, &listing) else {
+        return;
+    };
+    assert!(codes(&report).contains(&LimitationCode::CompiledOutputPartlyRead));
+    let machine = report.target.machine_code.unwrap_or_default();
+    assert_eq!(machine.divisions, 501);
+    assert_eq!(machine.divisions_without_line, 0);
+    assert_eq!(machine.division_lines.len(), 500);
+}
+
+#[test]
+fn every_division_in_the_machine_code_is_listed_at_the_line_that_reaches_it() {
+    let unit = shared_line("e-m:e-i64:64", "sealed", "open")
+        .replace(
+            "!6 = distinct !DISubprogram(name: \"shared\", file: !1, line: 1)",
+            "!6 = distinct !DISubprogram(name: \"shared\", file: !12, line: 1)\n!12 = !DIFile(filename: \"num.rs\", directory: \"/toolchain/core\")",
+        )
+        .replace("urem i32 %v, 3329", "urem i32 %v, %v");
+    let listing = "\t.file\t1 \"src/lib.rs\"\n\t.file\t2 \"/toolchain/core\" \"num.rs\"\nsealed:\n\t.loc\t2 2 5\n\tudiv\tw0, w0, w1\n\tret\nopen:\n\t.loc\t2 2 5\n\tudiv\tw0, w0, w1\n\tudiv\tw2, w2, w1\n\tret\nOUTLINED_FUNCTION_0:\n\tudiv\tw0, w0, w1\n\tret\nalone:\n\t.loc\t2 2 5\n\tudiv\tw0, w0, w1\n\tret\n";
+    let project = project("compiled-machine-list");
+    project.write("out/unit.ll", &unit);
+    project.write("out/unit.s", listing);
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    let Ok(report) = result else { return };
+    assert_eq!(
+        divisions(&report),
+        [("src/lib.rs".to_owned(), 5, Confidence::Likely)]
+    );
+    assert_eq!(
+        report.target.machine_code,
+        Some(MachineCode {
+            divisions: 5,
+            divisions_without_line: 2,
+            division_lines: vec![
+                division_line("src/lib.rs", 5, true, false),
+                division_line("src/lib.rs", 9, false, false),
+            ],
+            ..MachineCode::default()
+        })
+    );
+    let text = format!("{:?}", report.target.machine_code);
+    assert!(!text.contains("toolchain"), "{text}");
+}
+
+const BY_HAND: &str = r#"target triple = "TRIPLE"
+
+define i32 @reduce(ptr %key, i32 %m) !dbg !4 {
+start:
+  %v = load i32, ptr %key, align 4, !dbg !7
+  %q = tail call i32 asm sideeffect inteldialect "xor edx, edx\0Adiv ${1:k}", "={ax},r,0,~{dx},~{dirflag},~{fpsr},~{flags}"(i32 %m, i32 %v) #1, !dbg !8, !srcloc !3
+  store volatile i32 0, ptr %key, align 4, !dbg !9
+  ret i32 %q, !dbg !9
+}
+
+define i32 @spin(i32 %n) !dbg !5 {
+start:
+  %r = tail call i32 asm sideeffect inteldialect "2:\0Adec ${0:k}\0Ajnz 2b", "=&r,0,~{dirflag},~{fpsr},~{flags}"(i32 %n) #1, !dbg !10, !srcloc !3
+  ret i32 %r, !dbg !10
+}
+
+define i32 @keep(ptr %key, i32 %m) !dbg !6 {
+start:
+  %v = load i32, ptr %key, align 4, !dbg !11
+  %r = urem i32 %v, %m, !dbg !11
+  store volatile i32 0, ptr %key, align 4, !dbg !12
+  ret i32 %r, !dbg !11
+}
+
+!1 = !DIFile(filename: "src/lib.rs", directory: "")
+!3 = !{i64 100}
+!4 = distinct !DISubprogram(name: "reduce", file: !1, line: 2)
+!5 = distinct !DISubprogram(name: "spin", file: !1, line: 10)
+!6 = distinct !DISubprogram(name: "keep", file: !1, line: 18)
+!7 = !DILocation(line: 3, column: 5, scope: !4)
+!8 = !DILocation(line: 4, column: 9, scope: !4)
+!9 = !DILocation(line: 5, column: 5, scope: !4)
+!10 = !DILocation(line: 12, column: 9, scope: !5)
+!11 = !DILocation(line: 20, column: 5, scope: !6)
+!12 = !DILocation(line: 21, column: 5, scope: !6)
+"#;
+
+const BY_HAND_LISTING: &str = "\t.file\t1 \"src/lib.rs\"\nreduce:\n\t.loc\t1 3 5\n\tmovl\t(%rdi), %eax\n\t.loc\t1 4 9\n\t#APP\n\n\txorl\t%edx, %edx\n\tdivl\t%esi\n\n\t#NO_APP\n\tretq\nspin:\n\t.loc\t1 12 9\n\t#APP\n\n.Ltmp1:\n\tdecl\t%eax\n\tjne\t.Ltmp1\n\n\t#NO_APP\n\tretq\nkeep:\n\t.loc\t1 20 5\n\tdivl\t%esi\n\tretq\nstray:\n\t#APP\n\tnop\n\t#NO_APP\n\tretq\n";
+
+fn by_hand(name: &str, unit: &str) -> Option<ScanReport> {
+    let project = project(name);
+    project.write("out/unit.ll", unit);
+    project.write("out/unit.s", BY_HAND_LISTING);
+    let result =
+        seethru_analyzer::scan_with(&project.root, with_output(&[project.root.join("out")]));
+    assert!(result.is_ok(), "{result:?}");
+    result.ok()
+}
+
+#[test]
+fn hand_written_assembly_is_read_from_the_machine_code() {
+    let unit = BY_HAND.replace("TRIPLE", "x86_64-unknown-none-elf");
+    let Some(report) = by_hand("compiled-by-hand", &unit) else {
+        return;
+    };
+    let found: Vec<(&str, u32, Confidence)> = report
+        .findings
+        .iter()
+        .filter_map(|f| Some((f.id.as_str(), f.location.as_ref()?.line, f.confidence)))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                "secret-dependent-division:file:src/lib.rs:asm:1",
+                4,
+                Confidence::Review
+            ),
+            (
+                "secret-dependent-division:file:src/lib.rs:1",
+                20,
+                Confidence::Likely
+            ),
+        ]
+    );
+    let in_block = report.findings.iter().find(|f| f.id.ends_with(":asm:1"));
+    let title = in_block.map(|f| f.title.en.as_str()).unwrap_or_default();
+    assert!(title.contains("Hand-written assembly"), "{title}");
+    assert_eq!(
+        report.target.machine_code,
+        Some(MachineCode {
+            divisions: 2,
+            divisions_without_line: 0,
+            division_lines: vec![
+                division_line("src/lib.rs", 4, true, true),
+                division_line("src/lib.rs", 20, true, false),
+            ],
+            assembly_blocks: 3,
+            assembly_blocks_without_line: 1,
+            assembly_lines: vec![
+                assembly_line(4, true, false, true),
+                assembly_line(12, false, true, false),
+            ],
+        })
+    );
+    assert_eq!(codes(&report), [LimitationCode::CompiledChecksPartial]);
+}
+
+#[test]
+fn assembly_seethru_cannot_read_is_named_as_not_checked() {
+    let outside = format!(
+        "module asm \".globl raw\"\nmodule asm \"raw:\"\n{}",
+        BY_HAND.replace("TRIPLE", "x86_64-unknown-none-elf")
+    );
+    let Some(report) = by_hand("compiled-by-hand-outside", &outside) else {
+        return;
+    };
+    assert!(codes(&report).contains(&LimitationCode::AssemblyOutsideFunctionsNotRead));
+    assert!(!codes(&report).contains(&LimitationCode::MachineCodeProcessorNotKnown));
+
+    let unknown = BY_HAND.replace("TRIPLE", "mips64-unknown-linux-gnuabi64");
+    let Some(report) = by_hand("compiled-by-hand-unknown", &unknown) else {
+        return;
+    };
+    assert!(codes(&report).contains(&LimitationCode::MachineCodeProcessorNotKnown));
+    assert!(!codes(&report).contains(&LimitationCode::AssemblyOutsideFunctionsNotRead));
+    let lines = report
+        .target
+        .machine_code
+        .map(|machine| machine.assembly_lines)
+        .unwrap_or_default();
+    assert_eq!(
+        lines,
+        [
+            assembly_line(4, true, false, true),
+            assembly_line(12, false, false, false),
+        ]
     );
 }
 

@@ -58,6 +58,7 @@ fn empty_report() -> ScanReport {
             ecosystems: Vec::new(),
             inputs: Vec::new(),
             limitations: Vec::new(),
+            machine_code: None,
         },
         summary: seethru_core::Summary::default(),
         nodes: Vec::new(),

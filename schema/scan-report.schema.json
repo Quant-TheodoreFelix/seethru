@@ -51,6 +51,36 @@
       ],
       "type": "string"
     },
+    "AssemblyLine": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "type": "boolean"
+        },
+        "divides": {
+          "type": "boolean"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "divides",
+        "branches",
+        "secret"
+      ],
+      "type": "object"
+    },
     "Basis": {
       "enum": [
         "path",
@@ -236,6 +266,32 @@
           "type": "object"
         }
       ]
+    },
+    "DivisionLine": {
+      "additionalProperties": false,
+      "properties": {
+        "assembly": {
+          "type": "boolean"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "secret",
+        "assembly"
+      ],
+      "type": "object"
     },
     "Ecosystem": {
       "enum": [
@@ -665,6 +721,8 @@
         "compiledOutputPartlyRead",
         "compiledOutputWithoutWipes",
         "outsideEntriesNotFound",
+        "machineCodeProcessorNotKnown",
+        "assemblyOutsideFunctionsNotRead",
         "binaryToolNotPermitted",
         "binaryToolFailed",
         "binaryNotFound",
@@ -719,6 +777,52 @@
         "path",
         "line",
         "column"
+      ],
+      "type": "object"
+    },
+    "MachineCode": {
+      "additionalProperties": false,
+      "properties": {
+        "assemblyBlocks": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "assemblyBlocksWithoutLine": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "assemblyLines": {
+          "items": {
+            "$ref": "#/$defs/AssemblyLine"
+          },
+          "type": "array"
+        },
+        "divisionLines": {
+          "items": {
+            "$ref": "#/$defs/DivisionLine"
+          },
+          "type": "array"
+        },
+        "divisions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "divisionsWithoutLine": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "divisions",
+        "divisionsWithoutLine",
+        "divisionLines",
+        "assemblyBlocks",
+        "assemblyBlocksWithoutLine",
+        "assemblyLines"
       ],
       "type": "object"
     },
@@ -1159,6 +1263,16 @@
             "$ref": "#/$defs/Limitation"
           },
           "type": "array"
+        },
+        "machineCode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MachineCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "name": {
           "type": "string"

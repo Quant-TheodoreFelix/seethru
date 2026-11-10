@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::asm::Naming;
+use super::asm::{Cpu, Naming};
 
 pub(crate) type Value = u32;
 
@@ -16,6 +16,7 @@ pub(crate) enum Callee {
     Function(String),
     Copy,
     Opaque,
+    Assembly,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,6 +103,8 @@ pub(crate) struct Module {
     pub functions: Vec<Function>,
     pub truncated: bool,
     pub naming: Naming,
+    pub cpu: Cpu,
+    pub file_assembly: bool,
     places: HashMap<u32, Place>,
     scopes: HashMap<u32, Scope>,
     files: HashMap<u32, String>,
@@ -111,11 +114,8 @@ impl Module {
     pub(crate) fn frames(&self, debug: u32) -> Vec<Frame> {
         let mut out = Vec::new();
         let mut next = Some(debug);
-        while let Some(id) = next {
-            if out.len() >= MAX_FRAMES {
-                break;
-            }
-            let Some(place) = self.places.get(&id) else {
+        for _ in 0..MAX_FRAMES {
+            let Some(place) = next.and_then(|id| self.places.get(&id)) else {
                 break;
             };
             if let Some(path) = place.scope.and_then(|scope| self.file_of(scope)) {
@@ -386,6 +386,19 @@ pub(crate) fn parse(text: &str) -> Module {
                     to.extend(targets(line, &mut blocks));
                     switching = line.trim_end().ends_with('[');
                 }
+                if line.trim_start().starts_with("to label ")
+                    && let Some(Instruction {
+                        op:
+                            Op::Call {
+                                callee: Callee::Assembly,
+                                ..
+                            },
+                        debug: debug @ None,
+                        ..
+                    }) = function.body.last_mut()
+                {
+                    *debug = instruction.debug;
+                }
                 instruction.block = block;
                 function.body.push(instruction);
             }
@@ -408,6 +421,10 @@ pub(crate) fn parse(text: &str) -> Module {
             metadata(line, &mut module);
         } else if let Some(layout) = line.strip_prefix("target datalayout = ") {
             module.naming = Naming::of(layout);
+        } else if let Some(triple) = line.strip_prefix("target triple = ") {
+            module.cpu = Cpu::of(triple);
+        } else if line.starts_with("module asm ") {
+            module.file_assembly = true;
         } else if let Some(rest) = line.strip_prefix("attributes #")
             && let Some(id) = number_after(line, "attributes #")
         {
@@ -647,7 +664,7 @@ fn instruction<'a>(line: &'a str, names: &mut Names<'a>) -> Option<Instruction> 
         "extractvalue" | "freeze" | "bitcast" | "addrspacecast" => Op::Alias {
             of: names.locals(rest),
         },
-        "call" | "invoke" => call(rest, names),
+        "call" | "invoke" | "callbr" => call(rest, names),
         "tail" | "musttail" | "notail" => match rest.strip_prefix("call ") {
             Some(rest) => call(rest, names),
             None => Op::Other {
@@ -688,9 +705,20 @@ fn call<'a>(rest: &'a str, names: &mut Names<'a>) -> Op {
         .into_iter()
         .find(|token| bytes.get(token.end) == Some(&b'(') && depth_at.get(token.end) == Some(&0));
     let Some(target) = target else {
+        let assembly = rest
+            .split('"')
+            .next()
+            .unwrap_or_default()
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|word| word == "asm");
+        let values = rest.split(" to label ").next().unwrap_or_default();
         return Op::Call {
-            callee: Callee::Opaque,
-            args: names.locals(rest).into_iter().map(Some).collect(),
+            callee: if assembly {
+                Callee::Assembly
+            } else {
+                Callee::Opaque
+            },
+            args: names.locals(values).into_iter().map(Some).collect(),
             returns_pointer: false,
         };
     };

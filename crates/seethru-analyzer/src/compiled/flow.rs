@@ -49,6 +49,15 @@ pub(crate) struct Site {
     pub function: usize,
     pub debug: u32,
     pub by_variable: bool,
+    pub secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Assembly {
+    pub module: usize,
+    pub function: usize,
+    pub debug: u32,
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,6 +68,7 @@ pub(crate) struct Stop {
 
 pub(crate) struct Flow {
     pub sites: Vec<Site>,
+    pub assembly: Vec<Assembly>,
     pub stops: Vec<Stop>,
     pub entries: usize,
     pub wipes: usize,
@@ -113,7 +123,7 @@ impl Local {
                 } => slot.push(*base),
                 Op::Alias { of } => slot.extend(of.iter().copied()),
                 Op::Call {
-                    callee: Callee::Function(_) | Callee::Opaque,
+                    callee: Callee::Function(_) | Callee::Opaque | Callee::Assembly,
                     args,
                     returns_pointer: true,
                 } => slot.extend(args.iter().flatten().copied()),
@@ -282,7 +292,7 @@ impl Local {
                         }
                         0
                     }
-                    Callee::Opaque => {
+                    Callee::Opaque | Callee::Assembly => {
                         for arg in args.iter().flatten() {
                             moved |= self.mark_read(*arg);
                         }
@@ -469,6 +479,7 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
     }
 
     let mut sites = Vec::new();
+    let mut assembly = Vec::new();
     let mut stops = Vec::new();
     let mut wipes = 0usize;
     for (at, (module_at, function)) in functions.iter().enumerate() {
@@ -512,28 +523,46 @@ pub(crate) fn analyze(modules: &[Module]) -> Flow {
                     }
                 }
             }
-            if let Op::Divide {
-                operands,
-                by_variable,
-            } = &instruction.op
-                && local.of_all(operands) & secret != 0
-                && let Some(debug) = instruction.debug
-            {
-                sites.push(Site {
+            let Some(debug) = instruction.debug else {
+                continue;
+            };
+            match &instruction.op {
+                Op::Divide {
+                    operands,
+                    by_variable,
+                } => sites.push(Site {
                     module: *module_at,
                     function: at - firsts[*module_at],
                     debug,
                     by_variable: *by_variable,
-                });
+                    secret: local.of_all(operands) & secret != 0,
+                }),
+                Op::Call {
+                    callee: Callee::Assembly,
+                    args,
+                    ..
+                } => assembly.push(Assembly {
+                    module: *module_at,
+                    function: at - firsts[*module_at],
+                    debug,
+                    secret: args
+                        .iter()
+                        .flatten()
+                        .any(|arg| (local.of(*arg) | local.held(*arg)) & secret != 0),
+                }),
+                _ => {}
             }
         }
     }
     sites.sort();
     sites.dedup();
+    assembly.sort();
+    assembly.dedup();
     stops.sort();
     stops.dedup();
     Flow {
         sites,
+        assembly,
         stops,
         entries,
         wipes,
