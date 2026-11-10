@@ -1,5 +1,6 @@
 mod build;
 mod mcp;
+mod probe;
 mod tool;
 
 use std::ffi::OsString;
@@ -18,6 +19,8 @@ Usage
                [--build-output DIR] [--sarif FILE]... [--sarif-out FILE]
                [--compile-commands FILE] [--llvm-ir PATH]... [--build]
                [--binary FILE]... [--tool NAME[=PATH]]...
+               [--probe URL (--staging | --production --confirm-production)]
+  seethru own URL [PATH] [--lang LANG]
   seethru mcp [--root DIR]... [--allow-build] [--tool NAME[=PATH]]...
   seethru schema
   seethru --version
@@ -60,7 +63,24 @@ Options
                objdump or dwarfdump (the LLVM versions), and both are needed
                to read a built program. Nothing is run without this option.
                PATH is the full path of the tool when it is not on PATH. The
-               tool gets 600 seconds, or SEETHRU_TOOL_TIMEOUT_SECS
+               tool gets 600 seconds, or SEETHRU_TOOL_TIMEOUT_SECS.
+               NAME curl is for --probe
+  --probe URL  Also check the running app at URL, such as
+               https://staging.example.com. seethru first confirms the app is
+               yours (see `seethru own`), then sends a few plain GET requests
+               to that address only, slowly, and keeps no page content. Every
+               request is written to PATH/.seethru/audit.jsonl before it is
+               sent. Needs --tool curl and one of --staging or --production.
+               http:// is accepted only for an app on this computer
+  --staging    The app at URL is a test copy. Prefer this
+  --production The app at URL is the one real users use. Also needs
+               --confirm-production
+
+Proving an app is yours
+  seethru own URL [PATH]
+               Prints the address and the one line the app must serve before
+               seethru will check it. Sends nothing. The line is kept in
+               PATH/.seethru/ownership
 
 MCP server (for coding agents, over standard input and output)
   --root DIR   A folder the agent may scan. Can be given more than once.
@@ -92,6 +112,13 @@ enum Command {
         build: bool,
         binaries: Vec<PathBuf>,
         tools: Vec<tool::Permit>,
+        probe: Option<probe::Plan>,
+        confirmed: bool,
+    },
+    Own {
+        target: seethru_guard::Target,
+        path: PathBuf,
+        lang: Lang,
     },
     Mcp {
         roots: Vec<PathBuf>,
@@ -130,6 +157,10 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
             let mut llvm_ir = Vec::new();
             let mut build = false;
             let mut binaries = Vec::new();
+            let mut probe_url = None;
+            let mut staging = false;
+            let mut production = false;
+            let mut confirmed = false;
             let mut tools: Vec<tool::Permit> = Vec::new();
             while let Some(arg) = parser.next()? {
                 match arg {
@@ -143,6 +174,10 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     Long("llvm-ir") => llvm_ir.push(PathBuf::from(parser.value()?)),
                     Long("build") => build = true,
                     Long("binary") => binaries.push(PathBuf::from(parser.value()?)),
+                    Long("probe") => probe_url = Some(parser.value()?.string()?),
+                    Long("staging") => staging = true,
+                    Long("production") => production = true,
+                    Long("confirm-production") => confirmed = true,
                     Long("tool") => {
                         let permit = tool::permit(&parser.value()?)
                             .map_err(|message| lexopt::Error::Custom(message.into()))?;
@@ -181,9 +216,46 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     "--sarif-out must be a different file from --sarif and --out".into(),
                 ));
             }
-            if !tools.is_empty() && binaries.is_empty() && !build {
+            let probe = match probe_url {
+                None if staging || production || confirmed => {
+                    return Err(lexopt::Error::Custom(
+                        "--staging, --production and --confirm-production need --probe URL".into(),
+                    ));
+                }
+                None => None,
+                Some(url) => {
+                    let target = seethru_guard::Target::parse(&url).map_err(|error| {
+                        lexopt::Error::Custom(format!("--probe: {error}").into())
+                    })?;
+                    if staging == production {
+                        return Err(lexopt::Error::Custom(
+                            "--probe needs exactly one of --staging or --production. Say which kind of app the address is".into(),
+                        ));
+                    }
+                    if staging && confirmed {
+                        return Err(lexopt::Error::Custom(
+                            "--confirm-production goes with --production".into(),
+                        ));
+                    }
+                    if production && !confirmed {
+                        return Err(lexopt::Error::Custom(
+                            "--production checks the app real users use. If that is what you want, add --confirm-production. Nothing was sent".into(),
+                        ));
+                    }
+                    Some(probe::Plan { target, production })
+                }
+            };
+            if tools.iter().any(|permit| permit.name.reads_binaries())
+                && binaries.is_empty()
+                && !build
+            {
                 return Err(lexopt::Error::Custom(
                     "--tool has nothing to read. Add --binary FILE or --build".into(),
+                ));
+            }
+            if tools.iter().any(|permit| !permit.name.reads_binaries()) && probe.is_none() {
+                return Err(lexopt::Error::Custom(
+                    "--tool curl has nothing to check. Add --probe URL".into(),
                 ));
             }
             if binaries.len() > tool::MAX_BINARIES {
@@ -205,6 +277,35 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                 build,
                 binaries,
                 tools,
+                probe,
+                confirmed,
+            })
+        }
+        "own" => {
+            let mut url = None;
+            let mut path = None;
+            let mut lang = Lang::default();
+            while let Some(arg) = parser.next()? {
+                match arg {
+                    Long("lang") => {
+                        let code = parser.value()?.string()?;
+                        lang = Lang::from_code(&code).ok_or_else(|| {
+                            lexopt::Error::Custom(format!("unknown language '{code}'").into())
+                        })?;
+                    }
+                    Value(value) if url.is_none() => url = Some(value.string()?),
+                    Value(value) if path.is_none() => path = Some(PathBuf::from(value)),
+                    other => return Err(other.unexpected()),
+                }
+            }
+            let url = url
+                .ok_or_else(|| lexopt::Error::Custom("own needs the address of the app".into()))?;
+            let target = seethru_guard::Target::parse(&url)
+                .map_err(|error| lexopt::Error::Custom(format!("own: {error}").into()))?;
+            Ok(Command::Own {
+                target,
+                path: path.unwrap_or_else(|| PathBuf::from(".")),
+                lang,
             })
         }
         "mcp" => {
@@ -218,6 +319,15 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, lexopt::Er
                     Long("tool") => {
                         let permit = tool::permit(&parser.value()?)
                             .map_err(|message| lexopt::Error::Custom(message.into()))?;
+                        if !permit.name.reads_binaries() {
+                            return Err(lexopt::Error::Custom(
+                                format!(
+                                    "--tool {} is not available to the MCP server yet",
+                                    permit.name.as_str()
+                                )
+                                .into(),
+                            ));
+                        }
                         if tools.iter().any(|known| known.name == permit.name) {
                             return Err(lexopt::Error::Custom(
                                 format!("--tool {} was given twice", permit.name.as_str()).into(),
@@ -284,6 +394,12 @@ fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     let mut stdout = io::stdout().lock();
     match command {
+        Command::Own { target, path, lang } => {
+            if !path.is_dir() {
+                return Err(format!("{} is not a folder", path.display()).into());
+            }
+            probe::own(&state_dir(&path)?, &target, lang, &mut stdout)?;
+        }
         Command::Mcp {
             roots,
             allow_build,
@@ -312,6 +428,8 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             build,
             binaries,
             tools,
+            probe,
+            confirmed,
         } => {
             let mut built = None;
             if build {
@@ -321,6 +439,17 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                 built = Some(dirs);
             }
             let collected = tool::collect(&path, &tools, &binaries, built.as_deref(), lang)?;
+            let observed = match &probe {
+                None => None,
+                Some(plan) => Some(probe::observe(
+                    &path,
+                    &state_dir(&path)?,
+                    plan,
+                    confirmed,
+                    &tools,
+                    lang,
+                )?),
+            };
             let options = seethru_analyzer::ScanOptions {
                 read_config,
                 build_output,
@@ -329,6 +458,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                 llvm_ir,
                 binaries: collected.binaries,
                 binary_problems: collected.problems,
+                observed,
             };
             let mut report = seethru_analyzer::scan_with(&path, options)?;
             seethru_fix::attach_fix_prompts(&mut report);
@@ -573,7 +703,7 @@ mod tests {
     fn scan_defaults_to_current_directory() {
         assert!(matches!(
             parse(args(&["scan"])),
-            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir, build: false, ref binaries, ref tools }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty() && binaries.is_empty() && tools.is_empty()
+            Ok(Command::Scan { ref path, out: None, json: false, lang: Lang::En, read_config: true, build_output: None, ref sarif, sarif_out: None, compile_commands: None, ref llvm_ir, build: false, ref binaries, ref tools, probe: None, confirmed: false }) if path.as_os_str() == "." && sarif.is_empty() && llvm_ir.is_empty() && binaries.is_empty() && tools.is_empty()
         ));
     }
 
@@ -815,6 +945,87 @@ mod tests {
         assert!(parse(args(&["mcp", "--tool", "objdump"])).is_err());
         assert!(parse(args(&["mcp", "--build"])).is_err());
         assert!(parse(args(&["mcp", "extra"])).is_err());
+    }
+
+    #[test]
+    fn a_running_app_is_checked_only_with_a_named_environment() {
+        assert!(matches!(
+            parse(args(&["scan", "--probe", "https://staging.example.com", "--staging", "--tool", "curl"])),
+            Ok(Command::Scan { probe: Some(ref plan), confirmed: false, ref tools, .. })
+                if !plan.production && plan.target.origin() == "https://staging.example.com" && tools.len() == 1
+        ));
+        assert!(matches!(
+            parse(args(&["scan", "--probe", "https://example.com", "--production", "--confirm-production"])),
+            Ok(Command::Scan { probe: Some(ref plan), confirmed: true, .. }) if plan.production
+        ));
+        assert!(matches!(
+            parse(args(&[
+                "scan",
+                "--probe",
+                "http://localhost:3000",
+                "--staging"
+            ])),
+            Ok(Command::Scan { probe: Some(_), .. })
+        ));
+        for refused in [
+            &["scan", "--probe", "https://example.com"][..],
+            &["scan", "--probe", "https://example.com", "--production"],
+            &[
+                "scan",
+                "--probe",
+                "https://example.com",
+                "--staging",
+                "--production",
+                "--confirm-production",
+            ],
+            &[
+                "scan",
+                "--probe",
+                "https://example.com",
+                "--staging",
+                "--confirm-production",
+            ],
+            &["scan", "--probe", "http://example.com", "--staging"],
+            &["scan", "--probe", "http://192.168.0.10", "--staging"],
+            &["scan", "--probe", "https://example.com/admin", "--staging"],
+            &[
+                "scan",
+                "--probe",
+                "https://user:pw@example.com",
+                "--staging",
+            ],
+            &["scan", "--probe", "example.com", "--staging"],
+            &["scan", "--staging"],
+            &["scan", "--confirm-production"],
+            &["scan", "--tool", "curl"],
+            &[
+                "scan",
+                "--probe",
+                "https://example.com",
+                "--staging",
+                "--tool",
+                "objdump",
+            ],
+            &["mcp", "--allow-build", "--tool", "curl"],
+        ] {
+            assert!(parse(args(refused)).is_err(), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn own_takes_an_address_and_a_folder() {
+        assert!(matches!(
+            parse(args(&["own", "https://staging.example.com", "app", "--lang", "ko"])),
+            Ok(Command::Own { ref target, ref path, lang: Lang::Ko })
+                if target.origin() == "https://staging.example.com" && path.as_os_str() == "app"
+        ));
+        assert!(matches!(
+            parse(args(&["own", "http://127.0.0.1:8080"])),
+            Ok(Command::Own { ref path, .. }) if path.as_os_str() == "."
+        ));
+        assert!(parse(args(&["own"])).is_err());
+        assert!(parse(args(&["own", "http://example.com"])).is_err());
+        assert!(parse(args(&["own", "https://example.com", "a", "b"])).is_err());
     }
 
     #[test]

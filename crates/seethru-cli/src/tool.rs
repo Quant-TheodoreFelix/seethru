@@ -23,15 +23,22 @@ const TOOL_PATH: &str = "/usr/bin:/bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Name {
+    Curl,
     Dwarfdump,
     Objdump,
 }
 
 impl Name {
-    const ALL: [Self; 2] = [Self::Dwarfdump, Self::Objdump];
+    const ALL: [Self; 3] = [Self::Curl, Self::Dwarfdump, Self::Objdump];
+    const BINARY: [Self; 2] = [Self::Dwarfdump, Self::Objdump];
+
+    pub(crate) fn reads_binaries(self) -> bool {
+        Self::BINARY.contains(&self)
+    }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Curl => "curl",
             Self::Dwarfdump => "dwarfdump",
             Self::Objdump => "objdump",
         }
@@ -39,6 +46,7 @@ impl Name {
 
     fn programs(self) -> &'static [&'static str] {
         match self {
+            Self::Curl => &["curl"],
             Self::Dwarfdump => &["llvm-dwarfdump", "dwarfdump"],
             Self::Objdump => &["llvm-objdump", "objdump"],
         }
@@ -62,7 +70,7 @@ pub(crate) fn permit(text: &OsStr) -> Result<Permit, String> {
     let known = Name::ALL.iter().find(|known| known.as_str() == name);
     let Some(name) = known else {
         return Err(format!(
-            "unknown tool '{name}'. seethru can run dwarfdump and objdump"
+            "unknown tool '{name}'. seethru can run curl, dwarfdump and objdump"
         ));
     };
     let path = match path {
@@ -79,29 +87,30 @@ pub(crate) fn permit(text: &OsStr) -> Result<Permit, String> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Flavor {
+pub(crate) enum Flavor {
     Llvm,
     Gnu,
+    Curl,
 }
 
-struct Tool {
-    name: Name,
-    program: PathBuf,
-    flavor: Flavor,
-    version: String,
+pub(crate) struct Tool {
+    pub(crate) name: Name,
+    pub(crate) program: PathBuf,
+    pub(crate) flavor: Flavor,
+    pub(crate) version: String,
 }
 
 #[derive(Debug)]
-enum RunError {
+pub(crate) enum RunError {
     Start(io::Error),
     TimedOut,
     TooMuch,
     Failed,
 }
 
-struct Limits {
-    timeout: Duration,
-    max_bytes: u64,
+pub(crate) struct Limits {
+    pub(crate) timeout: Duration,
+    pub(crate) max_bytes: u64,
 }
 
 enum Piece {
@@ -151,7 +160,7 @@ fn pump(stdout: impl Read, max_bytes: u64, out: &SyncSender<Piece>) {
     }
 }
 
-fn run(
+pub(crate) fn run(
     program: &Path,
     args: &[OsString],
     limits: &Limits,
@@ -227,6 +236,14 @@ fn version_of(name: Name, text: &str) -> Option<(Flavor, String)> {
             .starts_with(|c: char| c.is_ascii_digit())
             .then(|| digits.trim_end_matches('.').to_owned())
     };
+    if name == Name::Curl {
+        return text
+            .lines()
+            .next()
+            .and_then(|first| first.strip_prefix("curl "))
+            .and_then(number)
+            .map(|version| (Flavor::Curl, version));
+    }
     if let Some(at) = text.find("LLVM version ") {
         return number(&text[at + "LLVM version ".len()..]).map(|version| (Flavor::Llvm, version));
     }
@@ -300,7 +317,7 @@ fn locate(root: &Path, permit: &Permit) -> Result<Option<PathBuf>, Failure> {
     Ok(None)
 }
 
-fn say(lang: Lang, program: &Path, args: &[OsString]) {
+pub(crate) fn say(lang: Lang, program: &Path, args: &[OsString]) {
     let mut command = program.display().to_string();
     for arg in args {
         command.push(' ');
@@ -313,7 +330,7 @@ fn say(lang: Lang, program: &Path, args: &[OsString]) {
     let _ = writeln!(io::stderr(), "{text}");
 }
 
-fn note(lang: Lang, en: &str, ko: &str) {
+pub(crate) fn note(lang: Lang, en: &str, ko: &str) {
     let _ = writeln!(
         io::stderr(),
         "{}",
@@ -324,16 +341,16 @@ fn note(lang: Lang, en: &str, ko: &str) {
     );
 }
 
-fn prepare(root: &Path, permit: &Permit, lang: Lang) -> Result<Option<Tool>, Failure> {
+pub(crate) fn prepare(root: &Path, permit: &Permit, lang: Lang) -> Result<Option<Tool>, Failure> {
     let name = permit.name.as_str();
     let Some(program) = locate(root, permit)? else {
         note(
             lang,
             &format!(
-                "seethru did not find {name} on this computer. Install LLVM, or give the full path with --tool {name}=PATH."
+                "seethru did not find {name} on this computer. Install it, or give the full path with --tool {name}=PATH."
             ),
             &format!(
-                "이 컴퓨터에서 {name}를 찾지 못했어요. LLVM을 설치하거나 --tool {name}=경로 로 전체 경로를 알려 주세요."
+                "이 컴퓨터에서 {name}를 찾지 못했어요. 설치하거나 --tool {name}=경로 로 전체 경로를 알려 주세요."
             ),
         );
         return Ok(None);
@@ -500,12 +517,16 @@ fn given_binary(path: &Path) -> Result<(PathBuf, BinaryFormat), Failure> {
     }
 }
 
-fn timeout() -> Duration {
+pub(crate) fn timeout_or(default: Duration) -> Duration {
     std::env::var(TIMEOUT_ENV)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|seconds| (1..=86_400).contains(seconds))
-        .map_or(DEFAULT_TIMEOUT, Duration::from_secs)
+        .map_or(default, Duration::from_secs)
+}
+
+fn timeout() -> Duration {
+    timeout_or(DEFAULT_TIMEOUT)
 }
 
 fn read_one(
@@ -549,11 +570,13 @@ fn read_one(
                 args.extend(["-d", "-l", "--no-show-raw-insn"].map(Into::into));
                 args.push(binary.into());
             }
+            (Name::Curl, _) | (Name::Objdump, Flavor::Curl) => continue,
         }
         say(lang, &tool.program, &args);
         let ran = run(&tool.program, &args, &limits, &mut |line| match tool.name {
             Name::Dwarfdump => reader.debug_info(line),
             Name::Objdump => reader.disassembly(line),
+            Name::Curl => {}
         });
         if let Err(error) = ran {
             let why = match error {
@@ -643,12 +666,12 @@ pub(crate) fn collect(
         return Ok(out);
     }
     let allowed = |name: Name| permits.iter().any(|permit| permit.name == name);
-    if !Name::ALL.iter().all(|name| allowed(*name)) {
+    if !Name::BINARY.iter().all(|name| allowed(*name)) {
         out.problems.push(LimitationCode::BinaryToolNotPermitted);
         return Ok(out);
     }
     let mut tools = Vec::new();
-    for name in Name::ALL {
+    for name in Name::BINARY {
         let Some(permit) = permits.iter().find(|permit| permit.name == name) else {
             continue;
         };

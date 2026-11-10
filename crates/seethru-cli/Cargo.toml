@@ -14,6 +14,7 @@ path = "src/main.rs"
 seethru-core.workspace = true
 seethru-analyzer.workspace = true
 seethru-probe.workspace = true
+seethru-guard.workspace = true
 seethru-fix.workspace = true
 seethru-report.workspace = true
 seethru-mcp.workspace = true

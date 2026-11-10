@@ -708,6 +708,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "seethru-core",
+ "seethru-probe",
  "serde",
  "serde_json",
  "toml",
@@ -721,6 +722,7 @@ dependencies = [
  "seethru-analyzer",
  "seethru-core",
  "seethru-fix",
+ "seethru-guard",
  "seethru-mcp",
  "seethru-probe",
  "seethru-report",
@@ -749,6 +751,8 @@ name = "seethru-guard"
 version = "0.1.0"
 dependencies = [
  "seethru-core",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
