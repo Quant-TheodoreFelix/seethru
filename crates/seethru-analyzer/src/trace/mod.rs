@@ -1017,13 +1017,18 @@ pub(crate) fn emit(
                 }
             }
         }
+        let every_handler = entry
+            .handlers
+            .iter()
+            .all(|(handler, _)| reaches.iter().any(|reach| reach.handler == *handler));
         let exposure = if reaches.is_empty() {
             Exposure::Unknown
         } else if reaches.iter().any(|reach| reach.gate == Gate::Open) {
             Exposure::Public
-        } else if reaches
-            .iter()
-            .all(|reach| reach.gate == Gate::Guarded && !reach.truncated)
+        } else if every_handler
+            && reaches
+                .iter()
+                .all(|reach| reach.gate == Gate::Guarded && !reach.truncated)
         {
             Exposure::Authenticated
         } else {

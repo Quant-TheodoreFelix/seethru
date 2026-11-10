@@ -482,6 +482,12 @@ export async function withUser(req: Request, run: (user: unknown) => Promise<Res
             &format!("{imports}{}", route(body)),
         );
     }
+    project.write(
+        "src/app/api/mixed/route.ts",
+        &format!(
+            "{HEAD}export async function POST() {{\n  await requireUser();\n  await admin.from(\"orders\").delete().eq(\"id\", 1);\n}}\nexport async function GET() {{\n  return Response.json({{ ok: true }});\n}}\n"
+        ),
+    );
     let helpers: String = (0..40)
         .map(|index| format!("async function note{index}() {{}}\n"))
         .collect();
@@ -507,6 +513,7 @@ export async function withUser(req: Request, run: (user: unknown) => Promise<Res
         ("missing", Exposure::Unknown),
         ("object", Exposure::Unknown),
         ("error", Exposure::Unknown),
+        ("mixed", Exposure::Unknown),
         ("crowded", Exposure::Authenticated),
         ("crowdedopen", Exposure::Unknown),
     ];
